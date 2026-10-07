@@ -52,8 +52,8 @@ for job in spec:
             e1=E[g["ruled"][0]]; e2=E[g["ruled"][1]]; a1,b1=ends(e1); a2,b2=ends(e2)
             if a1.Distance(a2)+b1.Distance(b2) > a1.Distance(b2)+b1.Distance(a2): e2=TopoDS.Edge_s(e2.Reversed())
             f=BRepFill.Face_s(e1,e2); print(job.get("name",""),g,"ruled area %.2f tol %.4f"%(area(f),maxtol(f))); new.append(f); continue
-        pln=None
-        if isinstance(g,dict): surf=g.get("cyl"); pln=g.get("plane"); g=g["e"]
+        pln=None; force_fill=False
+        if isinstance(g,dict): surf=g.get("cyl"); pln=g.get("plane"); force_fill=g.get("fill",False); g=g["e"]
         else: surf=None
         idx=(list(range(g[0],g[1]+1)) if g[0]<=g[1] else list(range(g[0],len(E)))+list(range(0,g[1]+1))) if len(g)==2 and not job.get("explicit") else g
         mw=BRepBuilderAPI_MakeWire(); last=None; first=None
@@ -108,7 +108,7 @@ for job in spec:
             cs=Geom_CylindricalSurface((gp_Ax3(gp_Pnt(*surf[0]),gp_Dir(*surf[1]),gp_Dir(*surf[3])) if len(surf)>3 else gp_Ax3(gp_Pnt(*surf[0]),gp_Dir(*surf[1]))),surf[2]); f=BRepBuilderAPI_MakeFace(cs,w,True).Face(); how="cyl"
             _sf=ShapeFix_Face(f); _sf.Perform()
             if area(_sf.Face())<0: f=BRepBuilderAPI_MakeFace(cs,TopoDS.Wire_s(w.Reversed()),True).Face(); how="cyl-r"
-        elif mf.IsDone(): f=mf.Face()
+        elif mf.IsDone() and not force_fill: f=mf.Face()
         else:
             how="fill"; fl=(BRepOffsetAPI_MakeFilling(3,15,2,False,1e-5,1e-4,0.01,0.1,8,9) if len(idx)>12 else BRepOffsetAPI_MakeFilling(3,40,4,False,1e-6,1e-5,0.01,0.1,10,30)); e2=TopExp_Explorer(w,TopAbs_EDGE)
             while e2.More(): fl.Add(TopoDS.Edge_s(e2.Current()),GeomAbs_C0); e2.Next()
