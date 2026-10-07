@@ -6,6 +6,7 @@
 | `Gun_structure_cleanup_pass2.step` | linear rail (043/052 + rods, bearings, end supports) merged into one solid; part 270 rebuilt as a closed solid |
 | `Gun_structure_cleanup_pass3.step` | part 012 hole pattern rebuilt; camera box 272+273 as a hollow box; its contents simplified |
 | `Gun_structure_cleanup_pass4.step` | every remaining part closed: `base` housing and 083 arm / 097 slider rebuilt, fasteners simplified, stray caps removed. All 34 parts are valid closed solids |
+| `Gun_structure_cleanup_pass5.step` | camera box attached to the rail with a simple U-bracket (`CAMERA_MOUNT`, two 3 mm walls + bottom plate, cut around 012/016/083) |
 
 Each pass is regenerated from the previous one with `scripts/build_passN.py <in> <out>`
 (needs `cadquery-ocp`, i.e. OpenCascade 7.8).
