@@ -6,7 +6,7 @@ from OCP.BRepFill import BRepFill_Filling
 from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeFilling
 from OCP.GeomAbs import GeomAbs_C0
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
-s=rd(sys.argv[1]); skip=set(int(a) for a in sys.argv[3].split(',')) if len(sys.argv)>3 else set()
+s=rd(sys.argv[1]); skip=set(int(a) for a in sys.argv[3].split(',') if a) if len(sys.argv)>3 else set()
 def area(f): p=GProp_GProps(); BRepGProp.SurfaceProperties_s(f,p); return p.Mass()
 def maxtol(sh):
     mt=0; e=TopExp_Explorer(sh,TopAbs_EDGE)

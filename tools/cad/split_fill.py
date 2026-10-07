@@ -30,6 +30,19 @@ for job in spec:
             a,b=ends(e); print(f"  {i:2d} ({a.X():7.2f},{a.Y():8.2f},{a.Z():7.2f}) -> ({b.X():7.2f},{b.Y():8.2f},{b.Z():7.2f})")
         continue
     for gi,g in enumerate(job["groups"]):
+        if isinstance(g,dict) and "loft" in g:
+            from OCP.BRepOffsetAPI import BRepOffsetAPI_ThruSections
+            ws=[]
+            for k,ch in enumerate(g["loft"]):
+                mw=BRepBuilderAPI_MakeWire()
+                seq=[E[i] for i in ch]
+                if k==1: seq=[TopoDS.Edge_s(e_.Reversed()) for e_ in reversed(seq)]
+                for e_ in seq: mw.Add(e_)
+                ws.append(mw.Wire())
+            ts=BRepOffsetAPI_ThruSections(False,True,1e-6); ts.AddWire(ws[0]); ts.AddWire(ws[1]); ts.CheckCompatibility(g.get("compat",True)); ts.Build()
+            fx=TopExp_Explorer(ts.Shape(),TopAbs_FACE); tot=0
+            while fx.More(): f=TopoDS.Face_s(fx.Current()); tot+=area(f); new.append(f); fx.Next()
+            print(job.get("name",""),g,"loft area %.2f tol %.4f"%(tot,maxtol(ts.Shape()))); continue
         if isinstance(g,dict) and "rule_chord" in g:
             from OCP.BRepFill import BRepFill
             e1=E[g["rule_chord"]]; a1,b1=ends(e1); ch=BRepBuilderAPI_MakeEdge(a1,b1).Edge()
@@ -46,6 +59,17 @@ for job in spec:
         mw=BRepBuilderAPI_MakeWire(); last=None; first=None
         from OCP.gp import gp_Pnt
         for i in idx:
+            if isinstance(i,list) and i[0]=="bs":
+                from OCP.GeomAPI import GeomAPI_PointsToBSpline
+                from OCP.TColgp import TColgp_Array1OfPnt
+                pts=i[1]; cand=[q for e_ in E for q in ends(e_)]
+                pe_=gp_Pnt(*pts[-1]); qb=min(cand,key=lambda q:q.Distance(pe_))
+                if qb.Distance(pe_)<0.02: pe_=qb
+                arr=TColgp_Array1OfPnt(1,len(pts)+1); arr.SetValue(1,last)
+                for k_,q_ in enumerate(pts[:-1]): arr.SetValue(k_+2,gp_Pnt(*q_))
+                arr.SetValue(len(pts)+1,pe_)
+                cv=GeomAPI_PointsToBSpline(arr,3,8,GeomAbs_C2 if False else __import__('OCP.GeomAbs',fromlist=['x']).GeomAbs_C2,1e-5).Curve()
+                mw.Add(BRepBuilderAPI_MakeEdge(cv).Edge()); last=pe_; continue
             if isinstance(i,list) and i[0]=="arc":
                 from OCP.GC import GC_MakeArcOfCircle
                 pm_=gp_Pnt(*i[1:4]); pe_=gp_Pnt(*i[4:7])
@@ -81,7 +105,9 @@ for job in spec:
         elif surf:
             from OCP.Geom import Geom_CylindricalSurface
             from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
-            cs=Geom_CylindricalSurface(gp_Ax3(gp_Pnt(*surf[0]),gp_Dir(*surf[1])),surf[2]); f=BRepBuilderAPI_MakeFace(cs,w,True).Face(); how="cyl"
+            cs=Geom_CylindricalSurface((gp_Ax3(gp_Pnt(*surf[0]),gp_Dir(*surf[1]),gp_Dir(*surf[3])) if len(surf)>3 else gp_Ax3(gp_Pnt(*surf[0]),gp_Dir(*surf[1]))),surf[2]); f=BRepBuilderAPI_MakeFace(cs,w,True).Face(); how="cyl"
+            _sf=ShapeFix_Face(f); _sf.Perform()
+            if area(_sf.Face())<0: f=BRepBuilderAPI_MakeFace(cs,TopoDS.Wire_s(w.Reversed()),True).Face(); how="cyl-r"
         elif mf.IsDone(): f=mf.Face()
         else:
             how="fill"; fl=(BRepOffsetAPI_MakeFilling(3,15,2,False,1e-5,1e-4,0.01,0.1,8,9) if len(idx)>12 else BRepOffsetAPI_MakeFilling(3,40,4,False,1e-6,1e-5,0.01,0.1,10,30)); e2=TopExp_Explorer(w,TopAbs_EDGE)
@@ -89,7 +115,7 @@ for job in spec:
             fl.Build(); f=TopoDS.Face_s(fl.Shape())
         sf=ShapeFix_Face(f); sf.Perform(); f=sf.Face()
         if area(f)<0: f=TopoDS.Face_s(f.Reversed())
-        print(job.get("name",""),g,how,"area %.2f tol %.4f"%(area(f),maxtol(f))); new.append(f)
+        from OCP.BRepCheck import BRepCheck_Analyzer as _BA; print(job.get("name",""),g,how,"area %.2f tol %.4f"%(area(f),maxtol(f)),"valid",_BA(f).IsValid()); new.append(f)
 if new:
     import os; sw=BRepBuilderAPI_Sewing(float(os.environ.get("SEWTOL","1e-3"))); sw.Add(s)
     for f in new: sw.Add(f)
