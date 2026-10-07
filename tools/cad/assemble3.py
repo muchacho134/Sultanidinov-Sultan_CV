@@ -1,0 +1,18 @@
+import sys
+src=open("assemble2.py").read()
+head=src.split("k114=[k for k")[0].replace("src,out=sys.argv[1],sys.argv[2]","src,out=sys.argv[1],sys.argv[2]")
+exec(head)
+k114=[k for k in parts if k.endswith("114")][0]; k131="solid_131"
+rb=lambda p:(lambda s:(BRepTools.Read_s(s,p,BRep_Builder()),s)[1])(TopoDS_Shape())
+asm,comp,ref=parts[k131]; loc=st.GetLocation_s(comp)
+local=BRepBuilderAPI_Transform(rb("work/merged.brep"),loc.Inverted().Transformation(),True).Shape()
+nref=st.AddShape(local,False,True)
+a_=TDataStd_Name(); ref.FindAttribute(TDataStd_Name.GetID_s(),a_); TDataStd_Name.Set_s(nref,a_.Get())
+ncomp=st.AddComponent(asm,nref,loc)
+b_=TDataStd_Name()
+if comp.FindAttribute(TDataStd_Name.GetID_s(),b_): TDataStd_Name.Set_s(ncomp,b_.Get())
+st.RemoveComponent(comp); st.RemoveShape(ref,False)
+a114,c114,r114=parts[k114]; st.RemoveComponent(c114); st.RemoveShape(r114,False)
+st.UpdateAssemblies()
+w=STEPCAFControl_Writer(); w.SetNameMode(True); w.SetColorMode(True); w.SetLayerMode(True); w.SetPropsMode(True)
+w.Transfer(doc,STEPControl_AsIs); w.Write(out); print("written",out)

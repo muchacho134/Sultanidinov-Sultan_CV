@@ -1,0 +1,16 @@
+import numpy as np, matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+src=open("p110_sec.py").read()
+exec(src.split("A=rd(")[0])
+exec("def draw"+src.split("def draw")[1].split("pz=lambda")[0])
+A=rd("work/x_P200.brep")
+zs=(110,122,128,140,165,190,198,202.5)
+fig,axs=plt.subplots(2,4,figsize=(24,12))
+for ax,z in zip(axs.flat,zs):
+    draw(ax,A,gp_Pln(gp_Pnt(0,-267.9,z),gp_Dir(0,0,1)),lambda p:(p[0],p[1]),'k',None)
+    ax.add_patch(plt.Circle((0,-267.9),12.5,fill=False,ls=':',color='tab:blue')); ax.add_patch(plt.Circle((0,-267.9),9.5,fill=False,ls=':',color='tab:red'))
+    ax.set_aspect('equal'); ax.set_xlim(-14,14); ax.set_ylim(-282,-253); ax.grid(alpha=.3); ax.set_title(f"P200 section z={z}  (blue R12.5, red R9.5)")
+plt.tight_layout(); plt.savefig("work/p200_xsec.png",dpi=55)
+fig,ax=plt.subplots(2,1,figsize=(22,10))
+draw(ax[0],A,gp_Pln(gp_Pnt(0,-267.9,0),gp_Dir(1,0,0)),lambda p:(p[2],p[1]),'k',None); ax[0].set_aspect('equal'); ax[0].grid(alpha=.3); ax[0].set_title("P200 section x=0 (z,y)")
+draw(ax[1],A,gp_Pln(gp_Pnt(0,-267.9,0),gp_Dir(0,1,0)),lambda p:(p[2],p[0]),'k',None); ax[1].set_aspect('equal'); ax[1].grid(alpha=.3); ax[1].set_title("P200 section y=-267.9 (z,x)")
+plt.tight_layout(); plt.savefig("work/p200_lsec.png",dpi=55); print("ok")
