@@ -1,25 +1,25 @@
-"""Pass 5: attach the camera box to the arm with two small walls.
+"""Pass 5: attach the camera box to the slider 097.
 
-The box's -Y wall (Y -188.85) sits 9.75 mm above a flat face of the arm 083
-(Y -198.6).  Two plain walls bridge that gap, one on each side of the slider.
+The rectangular cable slot in the box's -Y wall (X -5.36..6.54, Z -39.02..30.98)
+faces the slider 097 across a 3 mm gap (box wall Y -188.85, slider face
+Y -191.85).  A 2 mm rectangular collar around the slot bridges that gap.
 
 usage: python build_pass5.py <pass4.step> <pass5.step>
 """
 import sys
-from asm_edit import Asm, compound
-from geo270 import box
+from asm_edit import Asm
+from geo270 import box, cut
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
 
 SRC, OUT = sys.argv[1], sys.argv[2]
-Y_ARM, Y_BOX = -198.6, -188.85
-Z0, Z1 = -40.0, 37.0
-walls = [box(-10.8, Y_ARM, Z0, -9.0, Y_BOX, Z1),     # left of the slider
-         box(10.0, Y_ARM, Z0, 12.5, Y_BOX, Z1)]      # right of the slider
-mount = compound(walls)
-assert BRepCheck_Analyzer(mount).IsValid()
+Y_SLIDER, Y_BOX, T = -191.85, -188.85, 2.0
+SX0, SX1, SZ0, SZ1 = -5.36, 6.54, -39.02, 30.98          # slot in the box wall
+collar = cut(box(SX0 - T, Y_SLIDER, SZ0 - T, SX1 + T, Y_BOX, SZ1 + T),
+             box(SX0, Y_SLIDER - 1, SZ0, SX1, Y_BOX + 1, SZ1))
+assert BRepCheck_Analyzer(collar).IsValid()
 
 a = Asm(SRC)
-a.add('CAMERA_MOUNT', mount, Quantity_Color(0.55, 0.57, 0.6, Quantity_TOC_RGB))
-a.write(OUT, 'Scope/gimbal structure - cleanup pass 5: camera box attached to the arm with two small walls')
+a.add('CAMERA_MOUNT', collar, Quantity_Color(0.55, 0.57, 0.6, Quantity_TOC_RGB))
+a.write(OUT, 'Scope/gimbal structure - cleanup pass 5: camera box attached to slider 097 with a collar around its slot')
 print('written', OUT)
