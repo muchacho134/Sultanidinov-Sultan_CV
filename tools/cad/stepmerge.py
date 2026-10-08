@@ -1,4 +1,4 @@
-import re, sys
+import re, sys, json
 files=[("work/grouped_m_lean.step","Gun"),("work/addin/gunstruct.step","Gun_structure"),("work/addin/body_lean.step","Body_with_handles"),("work/addin/handle.step","Handle_all_solids"),("work/addin/motor.step","Motor")]
 out=sys.argv[1]
 ent_re=re.compile(r'(?m)^#(\d+)\s*=\s*')
@@ -50,14 +50,22 @@ pd=add("PRODUCT_DEFINITION('design','',#%d,#%d)"%(pdf,pdctx))
 pds=add("PRODUCT_DEFINITION_SHAPE('','',#%d)"%pd)
 o=add("CARTESIAN_POINT('',(0.,0.,0.))"); dz=add("DIRECTION('',(0.,0.,1.))"); dx=add("DIRECTION('',(1.,0.,0.))")
 topax=add("AXIS2_PLACEMENT_3D('',#%d,#%d,#%d)"%(o,dz,dx))
-childax=[]
+TF=json.load(open("work/motor_tf.json"))
+inst=[]   # (label, root tuple, placement)
 for r in roots:
-    o2=add("CARTESIAN_POINT('',(0.,0.,0.))"); z2=add("DIRECTION('',(0.,0.,1.))"); x2=add("DIRECTION('',(1.,0.,0.))")
+    if r[0]=="Motor":
+        for k,t in enumerate(TF): inst.append(("Motor_%d"%(k+1),r,t))
+    else: inst.append((r[0],r,{"o":[0,0,0],"x":[1,0,0],"z":[0,0,1]}))
+f=lambda v:"(%s)"%",".join(repr(float(a)) for a in v)
+childax=[]
+for lab,r,t in inst:
+    o2=add("CARTESIAN_POINT('',%s)"%f(t["o"])); z2=add("DIRECTION('',%s)"%f(t["z"])); x2=add("DIRECTION('',%s)"%f(t["x"]))
     childax.append(add("AXIS2_PLACEMENT_3D('',#%d,#%d,#%d)"%(o2,z2,x2)))
 topsr=add("SHAPE_REPRESENTATION('',(#%s),#%d)"%(",#".join(str(x) for x in [topax]+childax),ctx))
 add("SHAPE_DEFINITION_REPRESENTATION(#%d,#%d)"%(pds,topsr))
 prc=[i for i,b in allE.items() if b.startswith("PRODUCT_RELATED_PRODUCT_CATEGORY(") or b.startswith("PRODUCT_CATEGORY(")]
-for k,(label,cpd,csr,cax,cctx,srt) in enumerate(roots):
+for k,(label,r,t) in enumerate(inst):
+    _,cpd,csr,cax,cctx,srt=r
     nauo=add("NEXT_ASSEMBLY_USAGE_OCCURRENCE('%d','%s','',#%d,#%d,$)"%(k+1,label,pd,cpd))
     npds=add("PRODUCT_DEFINITION_SHAPE('Placement','Placement of an item',#%d)"%nauo)
     idt=add("ITEM_DEFINED_TRANSFORMATION('','',#%d,#%d)"%(cax if cax else childax[k],childax[k]))
