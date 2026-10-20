@@ -162,10 +162,11 @@ def build():
     print("rear", valid(body.shape))
     # glazing: split off as its own solid
     # canopy glass: side outline, kept inboard of the fender / haunch crests
-    gtool = common(y_prism(*FT.CANOPY_GLASS, -1300, 1300),
+    # (intersecting the two prisms first leaves a tool the kernel cannot cut with;
+    #  applying them one after the other is reliable)
+    glass = common(common(body.shape, y_prism(*FT.CANOPY_GLASS, -1300, 1300)),
                    outline_prism(*FT.GLASS_PLAN, 'xy', 500, 1500))
-    glass = common(body.shape, gtool)
-    body.cut(gtool, None)
+    body.cut(glass, None)
     if not valid(body.shape):
         body.fix()
     print("after glass faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
