@@ -164,6 +164,8 @@ def build():
     L = B.LENGTH
     body.cut(outline_prism(*FT.REAR_RECESS, 'yz', L - 140, L + 50), 'dark')
     body.cut(outline_prism(*FT.DIFFUSER, 'yz', L - 320, L + 50), 'dark')
+    if not valid(body.shape):
+        body.fix()
     print("rear", valid(body.shape))
     # glazing and lamps are thin skins laid over the body (the body is not cut):
     # (outset loft  x  region)  minus  (body  x  region)

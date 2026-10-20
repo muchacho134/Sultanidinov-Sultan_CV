@@ -54,8 +54,8 @@ DIFFUSER = mirror_closed(rear([(1476, 712), (1420, 712), (1395, 718), (1365, 735
                                (1340, 790), (1476, 790)]), [5])
 # headlamps: long swept lens on the front fender top
 # side view: under the crest, down to the thin line running nose tip -> front arch
-HEAD_SIDE = (side([(36, 288), (52, 285), (80, 277), (110, 268), (140, 258), (150, 255),
-                   (150, 248), (140, 251), (110, 261), (80, 270), (52, 278), (36, 281)]), [0, 5, 6, 11])
+HEAD_SIDE = (side([(36, 289), (52, 286), (80, 278), (110, 269), (140, 259), (165, 250),
+                   (165, 238), (140, 247), (110, 257), (80, 266), (52, 274), (36, 277)]), [0, 5, 6, 11])
 # front view: teardrop from the fender top falling inboard (left lamp, y > 0)
 HEAD_FRONT = (front([(1200, 120), (1395, 120), (1395, 320), (1200, 320)]), [0, 1, 2, 3])
 
