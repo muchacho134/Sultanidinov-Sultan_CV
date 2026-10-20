@@ -106,6 +106,11 @@ def build():
     from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
     u = ShapeUpgrade_UnifySameDomain(op.Shape(), True, True, False); u.Build()
     s = u.Shape()
+    # split the periodic loft faces: booleans across the seam are unreliable
+    from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideClosed
+    from OCP.ShapeFix import ShapeFix_Shape
+    d = ShapeUpgrade_ShapeDivideClosed(s); d.SetNbSplitPoints(1); d.Perform()
+    fx = ShapeFix_Shape(d.Result()); fx.Perform(); s = fx.Shape()
     print("loft valid", valid(s), "vol m3 %.3f" % (volume(s) / 1e9))
     return s
 

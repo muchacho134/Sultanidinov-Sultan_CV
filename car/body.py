@@ -164,4 +164,6 @@ def cove(x, z):
 def full_loop(x, **kw):
     h = half_profile(x, **kw)
     loop = np.r_[h, h[-2:0:-1] * [-1, 1]]
+    # start at the bottom centre so the loft seam runs along the underside
+    loop = np.roll(loop, -(len(h) - 1), axis=0)
     return np.c_[np.full(len(loop), x), loop]
