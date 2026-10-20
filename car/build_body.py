@@ -66,7 +66,7 @@ def sample(c, n=500):
     return np.array([[c.Value(u).Y(), c.Value(u).Z()] for u in us])
 
 
-def solve(extra=()):
+def solve(extra=(), offset=0.0):
     xs = stations() + [B.LENGTH] + list(extra)
     xs = sorted(set(xs))
     loops = {x: B.full_loop(x) for x in xs}
@@ -76,8 +76,11 @@ def solve(extra=()):
     for it in range(4):
         worst = 0
         for x in xs:
-            c = interp(B.full_loop(x, dz=dz[x]) if B.canopy_height(x) == 0 else
-                       B.full_loop(x, hc=B.canopy_height(x) + dz[x]), params)
+            L = (B.full_loop(x, dz=dz[x]) if B.canopy_height(x) == 0 else
+                 B.full_loop(x, hc=B.canopy_height(x) + dz[x]))
+            c = interp(L, params)
+            if offset and it == 3:
+                c = interp(offset_loop(L, -offset), params)
             zmax = sample(c)[:, 1].max()
             e = B.SIL(x) - zmax
             dz[x] += e; worst = max(worst, abs(e)); curves[x] = c
@@ -88,14 +91,13 @@ def solve(extra=()):
 SPLIT_X = 2110.0   # mid-cabin: one loft over the whole car self-intersects
 
 
-def build():
-    """Two lofts (front / rear) sharing the section at SPLIT_X, glued into one solid."""
+def build(offset=0.0):
+    """Two lofts (front / rear) sharing the section at SPLIT_X, glued into one solid.
+    offset > 0 grows every section outwards (used for skins laid over the body)."""
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
     from OCP.BOPAlgo import BOPAlgo_GlueShift
-    xs, curves = solve()
-    xs = sorted(set(xs + [SPLIT_X]))
-    if SPLIT_X not in curves:
-        xs2, curves = solve(extra=[SPLIT_X])
+    xs, curves = solve(extra=[SPLIT_X], offset=offset)
+    xs = sorted(set(xs))
     parts = []
     for sel in ([x for x in xs if x <= SPLIT_X], [x for x in xs if x >= SPLIT_X]):
         ts = BRepOffsetAPI_ThruSections(True, False, 1e-4)
