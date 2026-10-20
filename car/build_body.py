@@ -9,7 +9,7 @@ from OCP.gp import gp_Pnt
 
 
 def stations():
-    xs = [0, 5, 14, 28, 48, 75, 110, 155, 210, 275, 350]
+    xs = [0, 18, 45, 85, 135, 195, 265, 345]
     xs += list(np.arange(430, B.LENGTH - 40, 80))
     return sorted(set(round(float(x), 2) for x in xs if x <= B.LENGTH))
 
@@ -88,33 +88,20 @@ def solve(extra=(), offset=0.0):
     return xs, curves
 
 
-SPLIT_X = 2110.0   # mid-cabin: one loft over the whole car self-intersects
+SPLIT_X = 2110.0   # extra section mid-cabin (kept for repeatable station sets)
 
 
 def build(offset=0.0):
-    """Two lofts (front / rear) sharing the section at SPLIT_X, glued into one solid.
+    """Body solid: one cubic surface interpolated through the fitted sections
+    (a high-degree loft oscillates between sections), periodic faces split.
     offset > 0 grows every section outwards (used for skins laid over the body)."""
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
-    from OCP.BOPAlgo import BOPAlgo_GlueShift
-    xs, curves = solve(extra=[SPLIT_X], offset=offset)
-    xs = sorted(set(xs))
-    parts = []
-    for sel in ([x for x in xs if x <= SPLIT_X], [x for x in xs if x >= SPLIT_X]):
-        ts = BRepOffsetAPI_ThruSections(True, False, 1e-4)
-        for x in sel:
-            ts.AddWire(wire_from_curve(curves[x]))
-        ts.Build(); parts.append(ts.Shape())
-    op = BRepAlgoAPI_Fuse(parts[0], parts[1]); op.SetGlue(BOPAlgo_GlueShift); op.Build()
-    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
-    u = ShapeUpgrade_UnifySameDomain(op.Shape(), True, True, False); u.Build()
-    s = u.Shape()
-    # split the periodic loft faces: booleans across the seam are unreliable
     from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideClosed
     from OCP.ShapeFix import ShapeFix_Shape
+    xs, curves = solve(extra=[SPLIT_X], offset=offset)
+    s = build_skin(sorted(set(xs)), curves)
     d = ShapeUpgrade_ShapeDivideClosed(s); d.SetNbSplitPoints(1); d.Perform()
-    fx = ShapeFix_Shape(d.Result()); fx.Perform(); s = fx.Shape()
-    print("loft valid", valid(s), "vol m3 %.3f" % (volume(s) / 1e9))
-    return s
+    fx = ShapeFix_Shape(d.Result()); fx.Perform()
+    return fx.Shape()
 
 
 def build_skin(xs, curves, nv=121):
