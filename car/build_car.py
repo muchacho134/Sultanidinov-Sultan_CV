@@ -81,6 +81,18 @@ class Tagged:
         return None
 
 
+def inner_body(s, dx=45.0, dy=40.0, dz=35.0):
+    """The body shrunk about its centre: used to give recessed panels a floor."""
+    from OCP.gp import gp_GTrsf, gp_Mat, gp_XYZ
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+    cx, cz = B.LENGTH / 2, 450.0
+    sx, sy, sz = 1 - dx / cx, 1 - dy / 1046.0, 1 - dz / cz
+    g = gp_GTrsf()
+    g.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz))
+    g.SetTranslationPart(gp_XYZ(cx * (1 - sx), 0, cz * (1 - sz)))
+    return BRepBuilderAPI_GTransform(s, g, True).Shape()
+
+
 def keep_solids(s, min_vol):
     """Compound of the solids of s larger than min_vol (drops boolean slivers)."""
     from OCP.TopoDS import TopoDS_Compound
@@ -121,7 +133,8 @@ def both_sides(make):
 
 
 def build():
-    body = Tagged(build_body.build())
+    core = build_body.build()
+    body = Tagged(core)
     # wheel arches / wheel houses
     for xa in (B.AXLE_F, B.AXLE_R):
         for sgn in (1, -1):
@@ -131,13 +144,16 @@ def build():
     # front intake: front-view mouth  x  side-view wedge
     mouth = outline_prism(*FT.INTAKE_FRONT, 'yz', -50, 600)
     wedge = outline_prism(*FT.INTAKE_SIDE, 'xz', -1300, 1300)
-    body.cut(common(mouth, wedge), 'dark')
+    itool = common(mouth, wedge)
+    body.cut(itool, 'dark')
+    # the intake is a black panel set back ~40 mm, not an empty hole
+    grille = keep_solids(common(itool, inner_body(core)), 1e5)
     print("intake", valid(body.shape))
     # side scoops: shallow recess + deeper duct, sill recess
     for sgn in (1, -1):
-        body.cut(y_prism(*FT.SCOOP, sgn * 885, sgn * 1400), 'recess')
-        body.cut(y_prism(*FT.SCOOP_IN, sgn * 700, sgn * 1400), 'dark')
-        body.cut(outline_prism(*FT.SILL, 'xz', sgn * 865, sgn * 1400), 'dark')
+        body.cut(y_prism(*FT.SCOOP, sgn * 845, sgn * 1400), 'recess')
+        body.cut(y_prism(*FT.SCOOP_IN, sgn * 660, sgn * 1400), 'dark')
+        body.cut(outline_prism(*FT.SILL, 'xz', sgn * 850, sgn * 1400), 'dark')
     print("scoops", valid(body.shape))
     # rear recess + diffuser
     L = B.LENGTH
@@ -145,14 +161,14 @@ def build():
     body.cut(outline_prism(*FT.DIFFUSER, 'yz', L - 320, L + 50), 'dark')
     print("rear", valid(body.shape))
     # glazing: split off as its own solid
-    side_glass = y_prism(*FT.GLASS_SIDE, -1300, 1300)
-    ws = common(outline_prism(*FT.WINDSHIELD, 'yz', float(B.X(360)), float(B.X(620))),
-                outline_prism(*FT.WS_PLAN, 'xy', 300, 1600))
-    gtool = fuse(side_glass, ws)
+    # canopy glass: side outline, kept inboard of the fender / haunch crests
+    gtool = common(y_prism(*FT.CANOPY_GLASS, -1300, 1300),
+                   outline_prism(*FT.GLASS_PLAN, 'xy', 500, 1500))
     glass = common(body.shape, gtool)
     body.cut(gtool, None)
     if not valid(body.shape):
         body.fix()
+    print("after glass faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
     print("glass", valid(body.shape), valid(glass), "%.1f L" % (volume(glass) / 1e6))
     # headlamps: lens solids split off the fender tops
     hs = outline_prism(*FT.HEAD_SIDE, 'xz', -1300, 1300)
@@ -164,9 +180,9 @@ def build():
     if not valid(body.shape):
         body.fix()
     body.fix(divide_closed=True)
-    print("body valid", valid(body.shape))
+    print("body valid", valid(body.shape), "faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
     print("lamps", valid(lamps), "%.1f L" % (volume(lamps) / 1e6))
-    return body, glass, lamps
+    return body, glass, lamps, grille
 
 
 def wheel(xa, sgn):
@@ -179,7 +195,8 @@ def wheel(xa, sgn):
 
 if __name__ == "__main__":
     from OCP.BRepTools import BRepTools
-    body, glass, lamps = build()
+    body, glass, lamps, grille = build()
+    BRepTools.Write_s(grille, "out/grille.brep")
     BRepTools.Write_s(body.shape, "out/body.brep")
     BRepTools.Write_s(glass, "out/glass.brep")
     BRepTools.Write_s(lamps, "out/lamps.brep")

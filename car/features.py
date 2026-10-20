@@ -54,12 +54,10 @@ DIFFUSER = mirror_closed(rear([(1476, 712), (1420, 712), (1395, 718), (1365, 735
                                (1340, 790), (1476, 790)]), [5])
 # headlamps: long swept lens on the front fender top
 # side view: under the crest, down to the thin line running nose tip -> front arch
-HEAD_SIDE = (side([(36, 287), (52, 284), (80, 276), (120, 262), (160, 247), (200, 231),
-                   (232, 219), (258, 211), (232, 186), (195, 166), (150, 146), (100, 128),
-                   (36, 120)]), [0, 7, 12])
+HEAD_SIDE = (side([(36, 288), (52, 285), (80, 277), (110, 268), (140, 258), (150, 255),
+                   (150, 248), (140, 251), (110, 261), (80, 270), (52, 278), (36, 281)]), [0, 5, 6, 11])
 # front view: teardrop from the fender top falling inboard (left lamp, y > 0)
-HEAD_FRONT = (front([(1236, 168), (1290, 166), (1340, 178), (1372, 200), (1395, 236),
-                     (1385, 250), (1340, 262), (1290, 252), (1256, 222), (1238, 190)]), [])
+HEAD_FRONT = (front([(1200, 120), (1395, 120), (1395, 320), (1200, 320)]), [0, 1, 2, 3])
 
 def _plan(pts):  # (x px, y mm) -> (x mm, y mm)
     return [(float(B.X(u)), float(v)) for u, v in pts]
@@ -69,3 +67,11 @@ def _plan(pts):  # (x px, y mm) -> (x mm, y mm)
 _ws = _plan([(378, 0), (381, 200), (390, 380), (404, 520), (420, 640), (600, 640),
              (590, 470), (574, 300), (566, 150), (564, 0)])
 WS_PLAN = (_ws + [(x, -y) for x, y in reversed(_ws[1:-1])], [4, 5, 13, 14])
+
+CANOPY_GLASS = (side([(378, 181), (378, 40), (740, 40), (790, 90), (820, 122), (833, 137),
+                      (822, 142), (760, 150), (700, 158), (640, 165), (580, 171), (530, 177),
+                      (495, 181), (440, 179)]), [0, 1, 2, 5])
+
+# plan limit of the canopy glass: curved base along the cowl, inboard of the crests
+_gp = _plan([(372, 0), (375, 250), (386, 450), (402, 590), (420, 690), (900, 690), (900, 0)])
+GLASS_PLAN = (_gp + [(x, -y) for x, y in reversed(_gp[1:-1])], [4, 5, 7, 8])

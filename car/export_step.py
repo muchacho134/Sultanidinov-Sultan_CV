@@ -45,6 +45,7 @@ def main(out):
     add(body, "Body", None, pickle.load(open("out/body_tags.pkl", "rb")))
     add(load("out/glass.brep"), "Glazing", 'glass')
     add(load("out/lamps.brep"), "Headlamps", 'lamp')
+    add(load("out/grille.brep"), "Front_grille", 'dark')
     for xa, ax in ((B.AXLE_F, "Front"), (B.AXLE_R, "Rear")):
         for s, side in ((1, "Left"), (-1, "Right")):
             add(wheel(xa, s), f"{ax}_{side}_wheel", 'tyre')

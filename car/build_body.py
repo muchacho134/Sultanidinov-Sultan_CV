@@ -10,9 +10,37 @@ from OCP.gp import gp_Pnt
 
 def stations():
     xs = [0, 5, 14, 28, 48, 75, 110, 155, 210, 275, 350]
-    xs += list(np.arange(430, 4330, 80))
-    xs += [4330, 4380, 4420, 4450, 4472, 4486, B.LENGTH]
+    xs += list(np.arange(430, B.LENGTH - 40, 80))
     return sorted(set(round(float(x), 2) for x in xs if x <= B.LENGTH))
+
+
+TAIL_R = 40.0   # rounded tail edge
+
+
+def offset_loop(L, d):
+    """Offset a closed (x, y, z) section loop inwards by d in its plane."""
+    P = L[:, 1:]
+    n = len(P)
+    t = np.roll(P, -1, 0) - np.roll(P, 1, 0)
+    nrm = np.c_[t[:, 1], -t[:, 0]]
+    nrm /= np.linalg.norm(nrm, axis=1)[:, None] + 1e-12
+    c = P.mean(0)
+    if np.mean(np.sum((P - c) * nrm, 1)) < 0:
+        nrm = -nrm
+    Q = P - d * nrm
+    return np.c_[L[:, 0], Q]
+
+
+def tail_loops(base_loop):
+    """Quarter-round the tail: sections behind L - TAIL_R shrink like a fillet."""
+    out = []
+    x0 = B.LENGTH - TAIL_R
+    for th in np.radians([30, 55, 75]):
+        x = x0 + TAIL_R * np.sin(th)
+        L = offset_loop(base_loop, TAIL_R * (1 - np.cos(th)))
+        L[:, 0] = x
+        out.append((x, L))
+    return out
 
 
 def chord_params(P):
@@ -38,8 +66,9 @@ def sample(c, n=500):
     return np.array([[c.Value(u).Y(), c.Value(u).Z()] for u in us])
 
 
-def solve():
-    xs = stations()
+def solve(extra=()):
+    xs = stations() + [B.LENGTH] + list(extra)
+    xs = sorted(set(xs))
     loops = {x: B.full_loop(x) for x in xs}
     params = np.mean([chord_params(L) for L in loops.values()], axis=0)
     dz = {x: 0.0 for x in xs}
@@ -56,7 +85,49 @@ def solve():
     return xs, curves
 
 
+SPLIT_X = 2110.0   # mid-cabin: one loft over the whole car self-intersects
+
+
 def build():
+    """Two lofts (front / rear) sharing the section at SPLIT_X, glued into one solid."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    from OCP.BOPAlgo import BOPAlgo_GlueShift
+    xs, curves = solve()
+    xs = sorted(set(xs + [SPLIT_X]))
+    if SPLIT_X not in curves:
+        xs2, curves = solve(extra=[SPLIT_X])
+    parts = []
+    for sel in ([x for x in xs if x <= SPLIT_X], [x for x in xs if x >= SPLIT_X]):
+        ts = BRepOffsetAPI_ThruSections(True, False, 1e-4)
+        for x in sel:
+            ts.AddWire(wire_from_curve(curves[x]))
+        ts.Build(); parts.append(ts.Shape())
+    op = BRepAlgoAPI_Fuse(parts[0], parts[1]); op.SetGlue(BOPAlgo_GlueShift); op.Build()
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+    u = ShapeUpgrade_UnifySameDomain(op.Shape(), True, True, False); u.Build()
+    s = u.Shape()
+    print("loft valid", valid(s), "vol m3 %.3f" % (volume(s) / 1e9))
+    return s
+
+
+def build_skin(xs, curves, nv=121):
+    """Sample every fitted section at common parameters (seam at the bottom centre)
+    and approximate one surface through the grid."""
+    from skin import skin_solid
+    c0 = curves[xs[0]]
+    a, b = c0.FirstParameter(), c0.LastParameter()
+    # loops start at the top centre; start the grid half way round = bottom centre
+    us = a + ((np.linspace(0, 1, nv) + 0.5) % 1.0) * (b - a)
+    us[-1] = us[0]
+    G = np.array([[[curves[x].Value(u).X(), curves[x].Value(u).Y(), curves[x].Value(u).Z()]
+                   for u in us] for x in xs])
+    s, surf = skin_solid(G)
+    print("skin valid", valid(s), "vol m3 %.3f" % (volume(s) / 1e9),
+          "poles %d x %d" % (surf.NbUPoles(), surf.NbVPoles()))
+    return s
+
+
+def build_thrusections():
     xs, curves = solve()
     ts = BRepOffsetAPI_ThruSections(True, False, 1e-4)
     for x in xs:
