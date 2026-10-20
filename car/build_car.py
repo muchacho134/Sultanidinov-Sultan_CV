@@ -81,6 +81,11 @@ class Tagged:
         return None
 
 
+def grown_body(s, d):
+    """The body scaled up about its centre by roughly d mm on the upper surfaces."""
+    return inner_body(s, -d * 3, -d, -d)
+
+
 def inner_body(s, dx=45.0, dy=40.0, dz=35.0):
     """The body shrunk about its centre: used to give recessed panels a floor."""
     from OCP.gp import gp_GTrsf, gp_Mat, gp_XYZ
@@ -160,29 +165,20 @@ def build():
     body.cut(outline_prism(*FT.REAR_RECESS, 'yz', L - 140, L + 50), 'dark')
     body.cut(outline_prism(*FT.DIFFUSER, 'yz', L - 320, L + 50), 'dark')
     print("rear", valid(body.shape))
-    # glazing: split off as its own solid
-    # canopy glass: side outline, kept inboard of the fender / haunch crests
-    # (intersecting the two prisms first leaves a tool the kernel cannot cut with;
-    #  applying them one after the other is reliable)
-    glass = common(common(body.shape, y_prism(*FT.CANOPY_GLASS, -1300, 1300)),
-                   outline_prism(*FT.GLASS_PLAN, 'xy', 500, 1500))
-    body.cut(glass, None)
-    if not valid(body.shape):
-        body.fix()
-    print("after glass faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
-    print("glass", valid(body.shape), valid(glass), "%.1f L" % (volume(glass) / 1e6))
-    # headlamps: lens solids split off the fender tops
+    # glazing and lamps are thin skins laid over the body (body itself is not cut):
+    # region of a slightly enlarged body inside the outline, minus the body
+    outer = grown_body(core, 5.0)
+    g_in = common(common(outer, y_prism(*FT.CANOPY_GLASS, -1300, 1300)),
+                  outline_prism(*FT.GLASS_PLAN, 'xy', 500, 1500))
+    glass = keep_solids(cut(g_in, body.shape), 1e4)
+    print("glass", valid(glass), "%.1f L" % (volume(glass) / 1e6))
     hs = outline_prism(*FT.HEAD_SIDE, 'xz', -1300, 1300)
     hf = outline_prism(*FT.HEAD_FRONT, 'yz', -100, 1400)
     hf = fuse(hf, mirror_y(hf))
-    htool = common(hs, hf)
-    lamps = keep_solids(common(body.shape, htool), 1e6)
-    body.cut(htool, None)
-    if not valid(body.shape):
-        body.fix()
+    lamps = keep_solids(cut(common(common(grown_body(core, 3.0), hs), hf), body.shape), 1e3)
+    print("lamps", valid(lamps), "%.2f L" % (volume(lamps) / 1e6))
     body.fix(divide_closed=True)
     print("body valid", valid(body.shape), "faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
-    print("lamps", valid(lamps), "%.1f L" % (volume(lamps) / 1e6))
     return body, glass, lamps, grille
 
 
