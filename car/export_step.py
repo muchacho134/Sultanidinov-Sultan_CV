@@ -14,7 +14,8 @@ import body as B
 
 RGB = {None: (0.90, 0.91, 0.93), 'well': (0.12, 0.12, 0.13), 'dark': (0.08, 0.08, 0.09),
        'recess': (0.45, 0.46, 0.50), 'glass': (0.10, 0.13, 0.17), 'lamp': (0.62, 0.72, 0.85),
-       'tyre': (0.05, 0.05, 0.05), 'disc': (0.62, 0.63, 0.66)}
+       'tyre': (0.05, 0.05, 0.05), 'disc': (0.62, 0.63, 0.66),
+       'trim': (0.90, 0.91, 0.93), 'fin': (0.22, 0.23, 0.25), 'red': (0.85, 0.04, 0.04)}
 
 
 def col(t):
@@ -43,9 +44,8 @@ def main(out):
 
     body = load("out/body.brep")
     add(body, "Body", None, pickle.load(open("out/body_tags.pkl", "rb")))
-    add(load("out/glass.brep"), "Glazing", 'glass')
-    add(load("out/lamps.brep"), "Headlamps", 'lamp')
-    add(load("out/grille.brep"), "Front_grille", 'dark')
+    for name, path, tag in pickle.load(open("out/parts.pkl", "rb")):
+        add(load(path), name, tag)
     for xa, ax in ((B.AXLE_F, "Front"), (B.AXLE_R, "Rear")):
         for s, side in ((1, "Left"), (-1, "Right")):
             add(wheel(xa, s), f"{ax}_{side}_wheel", 'tyre')

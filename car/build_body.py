@@ -10,7 +10,9 @@ from OCP.gp import gp_Pnt
 
 def stations():
     xs = [0, 18, 45, 85, 135, 195, 265, 345]
-    xs += list(np.arange(430, B.LENGTH - 40, 80))
+    xs += list(np.arange(430, 1300, 80))
+    xs += list(np.arange(1300, 3560, 40))      # the side hollow needs dense sections
+    xs += list(np.arange(3560, B.LENGTH - 40, 80))
     return sorted(set(round(float(x), 2) for x in xs if x <= B.LENGTH))
 
 

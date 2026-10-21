@@ -77,7 +77,7 @@ zW = curve([(0, 220), (300, 420), (700, 600), (984, 650), (1400, 600), (2000, 54
             (3000, 570), (3883, 690), (4300, 620), (4495, 450)], xpx=False)
 TUCK = curve([(0, 60), (500, 140), (4000, 150), (4495, 110)], xpx=False)
 
-N_TOP, N_CAN, N_SH, N_LO, N_FL = 16, 8, 16, 14, 5
+N_TOP, N_CAN, N_SH, N_LO, N_FL = 16, 8, 22, 22, 5
 
 
 def cosspace(a, b, n, end=True):
@@ -119,14 +119,19 @@ def half_profile(x, hc=None, dz=0.0):
     pts = [(y, upper_z(x, y, hc) + dz * smoothstep(y / yf)) for y in ys]
     # shoulder: superellipse quadrant centred (yf, zw)
     n1 = 2.0   # elliptical shoulder
-    th = np.linspace(0, np.pi / 2, N_SH + 1)[1:]
-    for t in th:
-        pts.append((yf + (w - yf) * np.sin(t) ** (2 / n1), zw + (zf - zw) * np.cos(t) ** (2 / n1)))
+    side = []
+    for t in np.linspace(0, np.pi / 2, 200)[1:]:
+        side.append((yf + (w - yf) * np.sin(t) ** (2 / n1), zw + (zf - zw) * np.cos(t) ** (2 / n1)))
     tuck = TUCK(x)
     yb = w - tuck
     n2 = 1.7   # side leans in progressively toward the floor
-    for t in np.linspace(0, np.pi / 2, N_LO + 1)[1:]:
-        pts.append((yb + tuck * np.cos(t) ** (2 / n2), zw - (zw - zb) * np.sin(t) ** (2 / n2)))
+    for t in np.linspace(0, np.pi / 2, 200)[1:]:
+        side.append((yb + tuck * np.cos(t) ** (2 / n2), zw - (zw - zb) * np.sin(t) ** (2 / n2)))
+    # resample the side evenly by arc length so the hollow is captured smoothly
+    side = np.array(side)
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(side, axis=0), axis=1))]
+    t_new = np.linspace(0, s[-1], N_SH + N_LO + 1)[1:]
+    pts += list(zip(np.interp(t_new, s, side[:, 0]), np.interp(t_new, s, side[:, 1])))
     for y in np.linspace(yb, 0, N_FL + 1)[1:]:
         pts.append((y, zb))
     pts = np.array(pts)
@@ -134,7 +139,7 @@ def half_profile(x, hc=None, dz=0.0):
         outer = pts[:, 0] > 0.9 * yf
         for i in np.where(outer)[0]:
             # never push a point inboard of the floor corner (would fold the section)
-            pts[i, 0] -= min(cove(x, pts[i, 1]), 0.85 * max(pts[i, 0] - yb, 0.0))
+            pts[i, 0] -= min(cove(x, pts[i, 1]) + dish(x, pts[i, 1]), 0.85 * max(pts[i, 0] - yb, 0.0))
     return pts
 
 
@@ -145,7 +150,7 @@ COVE_TOP = curve([(350, 222), (390, 232), (500, 224), (600, 214), (700, 204), (8
 _sail = np.array([(833, 140), (872, 175), (868, 195), (855, 215), (830, 239), (795, 263),
                   (745, 288), (690, 312), (640, 332), (600, 350)], float)
 _sail_z, _sail_x = Z(_sail[::-1, 1]), X(_sail[::-1, 0])
-COVE_D = 62.0
+COVE_D = 35.0
 
 
 def sail_x(z):
@@ -159,6 +164,42 @@ def cove(x, z):
     bot = smoothstep((z - 70) / 110)
     depth = COVE_D * (0.65 + 0.35 * smoothstep((x - X(450)) / (X(800) - X(450))))
     return depth * front * rear * top * bot
+
+
+# --- side hollow (goal image): the body surface itself dips into a soft dish,
+# so there is no cut edge. Outline in sheet px; depth falls off smoothly inside it.
+_DISH_PX = [(372, 268), (400, 252), (470, 238), (560, 222), (660, 206), (760, 192), (830, 186),
+            (858, 194), (850, 222), (820, 256), (775, 284), (710, 304), (620, 318), (520, 326),
+            (440, 324), (395, 306), (375, 288)]
+DISH_D, DISH_FEATHER = 60.0, 150.0
+
+
+def _closed_spline_mm(pts_px, n=600):
+    P = np.c_[X(np.array(pts_px)[:, 0]), Z(np.array(pts_px)[:, 1])]
+    P = np.r_[P[-1:], P, P[:2]]
+    out = []
+    for i in range(1, len(P) - 2):
+        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
+        for t in np.linspace(0, 1, n // (len(P) - 3), endpoint=False):
+            t2, t3 = t * t, t * t * t
+            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                              + (-p0 + 3 * p1 - 3 * p2 + p3) * t3))
+    return np.array(out)
+
+
+_DISH = _closed_spline_mm(_DISH_PX)
+from matplotlib.path import Path as _MPath
+_DISH_PATH = _MPath(_DISH)
+_DISH_X0, _DISH_X1 = _DISH[:, 0].min(), _DISH[:, 0].max()
+
+
+def dish(x, z):
+    if not (_DISH_X0 < x < _DISH_X1):
+        return 0.0
+    if not _DISH_PATH.contains_point((x, z)):
+        return 0.0
+    d = np.min(np.hypot(_DISH[:, 0] - x, _DISH[:, 1] - z))
+    return DISH_D * smoothstep(d / DISH_FEATHER)
 
 
 def full_loop(x, **kw):

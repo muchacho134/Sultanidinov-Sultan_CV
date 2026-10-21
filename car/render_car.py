@@ -12,7 +12,8 @@ import body as B
 
 COL = {None: (0.93, 0.93, 0.95), 'well': (0.25, 0.25, 0.27), 'dark': (0.16, 0.16, 0.18),
        'recess': (0.55, 0.56, 0.6), 'glass': (0.22, 0.27, 0.33), 'tyre': (0.1, 0.1, 0.1),
-       'disc': (0.72, 0.73, 0.76), 'lamp': (0.62, 0.72, 0.85)}
+       'disc': (0.72, 0.73, 0.76), 'lamp': (0.62, 0.72, 0.85),
+       'trim': (0.93, 0.93, 0.95), 'fin': (0.22, 0.23, 0.25), 'red': (0.9, 0.06, 0.06)}
 
 
 def mesh_faces(shape, labels, defl=0.5):
@@ -36,9 +37,8 @@ def mesh_faces(shape, labels, defl=0.5):
 def parts():
     body = load("out/body.brep"); tags = pickle.load(open("out/body_tags.pkl", "rb"))
     out = [(body, tags), ]
-    g = load("out/glass.brep"); out.append((g, ['glass'] * len(faces(g))))
-    l = load("out/lamps.brep"); out.append((l, ['lamp'] * len(faces(l))))
-    g2 = load("out/grille.brep"); out.append((g2, ['dark'] * len(faces(g2))))
+    for name, path, tag in pickle.load(open("out/parts.pkl", "rb")):
+        s = load(path); out.append((s, [tag] * len(faces(s))))
     for xa in (B.AXLE_F, B.AXLE_R):
         for s in (1, -1):
             wh = wheel(xa, s)

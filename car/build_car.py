@@ -201,6 +201,7 @@ def both_sides(make):
 def build():
     core = build_body.build()
     body = Tagged(core)
+    parts = {}
     # wheel arches / wheel houses
     for xa in (B.AXLE_F, B.AXLE_R):
         for sgn in (1, -1):
@@ -212,40 +213,66 @@ def build():
     wedge = outline_prism(*FT.INTAKE_SIDE, 'xz', -1300, 1300)
     itool = common(mouth, wedge)
     body.cut(itool, 'dark')
-    # the intake is a black panel set back ~40 mm, not an empty hole
-    grille = keep_solids(common(itool, inner_body(core)), 1e5)
+    # the intake is a black panel set back ~40 mm; fins and a V blade sit in front of it
+    blades = None
+    for pts, cs in (FT.FIN, (([(-y, z) for y, z in FT.FIN[0]]), FT.FIN[1]), FT.VBLADE):
+        b_ = common(common(outline_prism(pts, cs, 'yz', -40, 500), itool), core)
+        blades = b_ if blades is None else fuse(blades, b_)
+    grille = keep_solids(cut(common(itool, inner_body(core)), blades), 1e5)
+    parts["Front_grille"] = (grille, 'dark')
+    parts["Intake_blades"] = (keep_solids(blades, 1e3), 'trim')
     print("intake", valid(body.shape))
-    # side scoops: shallow recess + deeper duct, sill recess
-    for sgn in (1, -1):
-        body.cut(y_prism(*FT.SCOOP, sgn * 845, sgn * 1400), 'recess')
-        body.cut(y_prism(*FT.SCOOP_IN, sgn * 660, sgn * 1400), 'dark')
-        body.cut(outline_prism(*FT.SILL, 'xz', sgn * 820, sgn * 1400), 'dark')
-    print("scoops", valid(body.shape))
-    # rear recess + diffuser
+    # rear recess + diffuser with fins
     L = B.LENGTH
     body.cut(outline_prism(*FT.REAR_RECESS, 'yz', L - 140, L + 50), 'dark')
-    body.cut(outline_prism(*FT.DIFFUSER, 'yz', L - 320, L + 50), 'dark')
+    dtool = outline_prism(*FT.DIFFUSER, 'yz', L - 320, L + 50)
+    body.cut(dtool, 'dark')
+    fins = None
+    for y in FT.DIFF_FINS_Y:
+        plate = poly_prism([(L - 320, y - 6), (L + 10, y - 6), (L + 10, y + 6), (L - 320, y + 6)], 'xy', -10, 400)
+        f_ = common(common(plate, dtool), core)
+        fins = f_ if fins is None else fuse(fins, f_)
+    parts["Diffuser_fins"] = (keep_solids(fins, 1e3), 'fin')
     if not valid(body.shape):
         body.fix()
     print("rear", valid(body.shape))
     soften(body)
     print("softened", valid(body.shape))
-    # glazing and lamps are thin skins laid over the body (the body is not cut):
-    # (outset loft  x  region)  minus  (body  x  region)
+    # splitter lip under the nose, sitting flush against the floor
+    sp = outline_prism(*FT.SPLITTER, 'xy', 58, 110)
+    parts["Front_splitter"] = (keep_solids(cut(sp, core), 1e3), 'dark')
+
+    # skins laid over the body (the body is not cut): (outset loft x region) - (body x region)
+    grown = {}
+
     def skin(region_ops, d):
-        outer, inner = grown_body(core, d), core
+        if d not in grown:
+            grown[d] = grown_body(core, d)
+        outer, inner = grown[d], core
         for op in region_ops:
             outer, inner = common(outer, op), common(inner, op)
         return keep_solids(cut(outer, inner), 1e3)
     glass = skin([y_prism(*FT.CANOPY_GLASS, -1300, 1300),
                   outline_prism(*FT.GLASS_PLAN, 'xy', 500, 1500)], 5.0)
+    parts["Glazing"] = (glass, 'glass')
     print("glass", valid(glass), "%.1f L" % (volume(glass) / 1e6))
     hf = outline_prism(*FT.HEAD_FRONT, 'yz', -100, 1400)
     lamps = skin([outline_prism(*FT.HEAD_SIDE, 'xz', -1300, 1300), fuse(hf, mirror_y(hf))], 3.0)
-    print("lamps", valid(lamps), "%.2f L" % (volume(lamps) / 1e6))
+    parts["Headlamps"] = (lamps, 'lamp')
+    duct = skin([y_prism(*FT.DUCT, -1300, 1300)], 4.0)
+    parts["Side_ducts"] = (duct, 'dark')
+    sill = None
+    for y0, y1 in ((600, 1300), (-1300, -600)):
+        s_ = skin([outline_prism(*FT.SILL_BLADE, 'xz', y0, y1)], 4.0)
+        sill = s_ if sill is None else fuse(sill, s_)
+    parts["Sill_blades"] = (sill, 'dark')
+    bar = skin([outline_prism(*FT.LIGHT_BAR, 'yz', L - 250, L + 50)], 4.0)
+    parts["Tail_light"] = (bar, 'red')
+    for k, (s_, t) in parts.items():
+        print("  %-15s valid %s  %.2f L" % (k, valid(s_), volume(s_) / 1e6))
     body.fix(divide_closed=True)
     print("body valid", valid(body.shape), "faces", len(faces(body.shape)), "vol L %.0f" % (volume(body.shape) / 1e6))
-    return body, glass, lamps, grille
+    return body, parts
 
 
 def wheel(xa, sgn):
@@ -258,13 +285,15 @@ def wheel(xa, sgn):
 
 if __name__ == "__main__":
     from OCP.BRepTools import BRepTools
-    body, glass, lamps, grille = build()
-    BRepTools.Write_s(grille, "out/grille.brep")
-    BRepTools.Write_s(body.shape, "out/body.brep")
-    BRepTools.Write_s(glass, "out/glass.brep")
-    BRepTools.Write_s(lamps, "out/lamps.brep")
     import pickle
-    tags = {}
+    body, parts = build()
+    BRepTools.Write_s(body.shape, "out/body.brep")
+    manifest = []
+    for name, (shape, tag) in parts.items():
+        path = "out/part_%s.brep" % name
+        BRepTools.Write_s(shape, path)
+        manifest.append((name, path, tag))
+    pickle.dump(manifest, open("out/parts.pkl", "wb"))
     allf = faces(body.shape)
     lab = [body.tag_of(f) for f in allf]
     pickle.dump(lab, open("out/body_tags.pkl", "wb"))

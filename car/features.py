@@ -76,3 +76,25 @@ CANOPY_GLASS = (side([(378, 178), (378, 40), (740, 40), (790, 90), (820, 122), (
 # plan limit of the canopy glass: curved base along the cowl, inboard of the crests
 _gp = _plan([(372, 0), (375, 250), (386, 450), (402, 590), (420, 690), (900, 690), (900, 0)])
 GLASS_PLAN = (_gp + [(x, -y) for x, y in reversed(_gp[1:-1])], [4, 5, 7, 8])
+
+
+# ---- goal-image treatments ----------------------------------------------------
+# dark duct in the rear of the side hollow (painted skin, no cut)
+DUCT = (side([(640, 236), (720, 219), (790, 208), (822, 210), (812, 234), (780, 262),
+              (730, 283), (670, 294), (636, 286), (628, 260)]), [])
+# dark sill blade along the rocker
+SILL_BLADE = (side([(372, 340), (450, 331), (600, 327), (760, 327), (860, 331), (905, 340),
+                    (905, 360), (372, 360)]), [0, 5, 6, 7])
+# intake fins and centre V blade (front view strokes, body colour)
+FIN = (front([(1295, 290), (1305, 290), (1335, 346), (1325, 346)]), [0, 1, 2, 3])
+VBLADE = (front([(1426, 296), (1476, 310), (1526, 296), (1526, 304), (1476, 318), (1426, 304)]),
+          [0, 1, 2, 3, 4, 5])
+# front splitter (plan, mm): sticks 25 mm ahead of the nose
+_sp = [(-25.0, 0.0), (-25.0, 260.0), (15.0, 420.0), (80.0, 610.0), (160.0, 750.0),
+       (260.0, 850.0), (420.0, 910.0), (420.0, 0.0)]
+SPLITTER = (_sp + [(x, -y) for x, y in reversed(_sp[1:-1])], [])
+# full-width tail light bar (rear view, mm): slight downward bow at the centre
+_lb = [(y, 552.0 - 14.0 * (1 - (y / 960.0) ** 2)) for y in np.linspace(-960, 960, 13)]
+LIGHT_BAR = (_lb + [(y, z - 24.0) for y, z in reversed(_lb)], [0, 12, 13, 25])
+# diffuser fin positions (mm)
+DIFF_FINS_Y = [(u - R_CX) * RS for u in (1372, 1410, 1442, 1510, 1542, 1580)]
