@@ -1,7 +1,7 @@
 # Concept car (STEP)
 
 `concept_car.step` is a coloured AP214 assembly in mm. X runs rearward from the nose, Z is up from the ground and Y is lateral.
-The parts are Body, Glazing, Headlamps, Front_grille and four plain cylinder wheels.
+The parts are Body, Glazing, Headlamps, Front_grille, Intake_blades, Front_splitter, Side_ducts, Sill_blades, Tail_light, Diffuser_fins and four plain cylinder wheels.
 
 - Length is 4500 mm, the scale anchor. Width is 2094 mm and height is 1146 mm. Wheelbase is 2899 mm.
 - The side elevation is driven straight by profiles traced from the concept sheet. `body.py` holds the keyframes in sheet pixels.
