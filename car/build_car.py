@@ -112,7 +112,7 @@ def keep_solids(s, min_vol):
     return comp
 
 
-def soften(body, r_arch=12.0, r_open=6.0, min_r=2.0):
+def soften(body, r_arch=12.0, r_open=6.0, min_r=3.0):
     """Fillet the edges where a cut meets the body skin, one edge at a time
     (batches fail on this surface); halve the radius on failure down to min_r.
     Face tags follow through the underlying surfaces."""

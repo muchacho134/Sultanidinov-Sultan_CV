@@ -86,7 +86,7 @@ def cosspace(a, b, n, end=True):
     return v if end else v[:-1]
 
 
-def g_dome(t, a=2.0, b=2.0):
+def g_dome(t, a=3.0, b=1.6):   # flat crown, tangent foot
     t = np.clip(np.abs(t), 0, 1)
     return (1 - t ** a) ** b
 
