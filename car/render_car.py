@@ -1,6 +1,6 @@
 import sys, pickle, numpy as np
 from overlay import load, overlay
-from shade import render_sheet
+from shade import render_sheet, vertex_normals
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.BRep import BRep_Tool
 from OCP.TopLoc import TopLoc_Location
@@ -15,8 +15,8 @@ COL = {None: (0.93, 0.93, 0.95), 'well': (0.25, 0.25, 0.27), 'dark': (0.16, 0.16
        'disc': (0.72, 0.73, 0.76), 'lamp': (0.62, 0.72, 0.85)}
 
 
-def mesh_faces(shape, labels, defl=1.2):
-    BRepMesh_IncrementalMesh(shape, defl, False, 0.2, True)
+def mesh_faces(shape, labels, defl=0.5):
+    BRepMesh_IncrementalMesh(shape, defl, False, 0.12, True)
     V, F, C, off = [], [], [], 0
     for f, lab in zip(faces(shape), labels):
         loc = TopLoc_Location(); t = BRep_Tool.Triangulation_s(f, loc)
@@ -54,6 +54,6 @@ if __name__ == "__main__":
         F += [(a + len(V), b + len(V), cc + len(V)) for a, b, cc in f]; V += v; C += c
         bb.Add(comp, shp)
     V, F, C = np.array(V), np.array(F), np.array(C)
-    render_sheet(V, F, C, sys.argv[1])
+    render_sheet(V, F, C, sys.argv[1], N=vertex_normals(V, F))
     if len(sys.argv) > 2:
         overlay(comp, sys.argv[2])

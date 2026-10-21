@@ -75,7 +75,7 @@ W = curve([(45, 300), (48, 420), (55, 540), (65, 640), (80, 740), (100, 830), (1
            (1125, 965), (1146, 880)])
 zW = curve([(0, 220), (300, 420), (700, 600), (984, 650), (1400, 600), (2000, 540),
             (3000, 570), (3883, 690), (4300, 620), (4495, 450)], xpx=False)
-TUCK = curve([(0, 40), (500, 85), (4000, 90), (4495, 70)], xpx=False)
+TUCK = curve([(0, 60), (500, 140), (4000, 150), (4495, 110)], xpx=False)
 
 N_TOP, N_CAN, N_SH, N_LO, N_FL = 16, 8, 16, 14, 5
 
@@ -86,7 +86,7 @@ def cosspace(a, b, n, end=True):
     return v if end else v[:-1]
 
 
-def g_dome(t, a=2.2, b=1.0):
+def g_dome(t, a=2.0, b=2.0):
     t = np.clip(np.abs(t), 0, 1)
     return (1 - t ** a) ** b
 
@@ -100,7 +100,7 @@ def upper_z(x, y, hc):
     yf = yF(x)
     zf, zh = zF(x), min(zH(x), zF(x))
     base = zh + (zf - zh) * smoothstep(y / yf)
-    return base + hc * g_dome(y / Wc(x))
+    return base + hc * g_dome(y / (1.12 * Wc(x)))
 
 
 def canopy_height(x):
@@ -114,17 +114,17 @@ def half_profile(x, hc=None, dz=0.0):
         hc = canopy_height(x)
     yf, zf, w, zw, zb = yF(x), zF(x) + dz, W(x), zW(x), zB(x)
     zw = float(np.clip(zw, zb + 40, zf - 60))
-    wc = min(Wc(x), 0.97 * yf)
+    wc = min(1.12 * Wc(x), 0.97 * yf)
     ys = np.r_[cosspace(0, wc, N_CAN, end=False), cosspace(wc, yf, N_TOP - N_CAN)]
     pts = [(y, upper_z(x, y, hc) + dz * smoothstep(y / yf)) for y in ys]
     # shoulder: superellipse quadrant centred (yf, zw)
-    n1 = 2.3
+    n1 = 2.0   # elliptical shoulder
     th = np.linspace(0, np.pi / 2, N_SH + 1)[1:]
     for t in th:
         pts.append((yf + (w - yf) * np.sin(t) ** (2 / n1), zw + (zf - zw) * np.cos(t) ** (2 / n1)))
     tuck = TUCK(x)
     yb = w - tuck
-    n2 = 2.0
+    n2 = 1.7   # side leans in progressively toward the floor
     for t in np.linspace(0, np.pi / 2, N_LO + 1)[1:]:
         pts.append((yb + tuck * np.cos(t) ** (2 / n2), zw - (zw - zb) * np.sin(t) ** (2 / n2)))
     for y in np.linspace(yb, 0, N_FL + 1)[1:]:

@@ -112,6 +112,67 @@ def keep_solids(s, min_vol):
     return comp
 
 
+def soften(body, r_arch=12.0, r_open=6.0, min_r=2.0):
+    """Fillet the edges where a cut meets the body skin, one edge at a time
+    (batches fail on this surface); halve the radius on failure down to min_r.
+    Face tags follow through the underlying surfaces."""
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    from OCP.TopExp import TopExp
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_BSplineSurface, GeomAbs_Cylinder
+    from OCP.BRep import BRep_Tool
+    from OCP.GCPnts import GCPnts_AbscissaPoint
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    surf_tag = {BRep_Tool.Surface_s(g): t for g, t in body.tags}
+    done, failed, tried = 0, 0, set()
+    while True:
+        s = body.shape
+        m = TopTools_IndexedDataMapOfShapeListOfShape()
+        TopExp.MapShapesAndAncestors_s(s, TopAbs_EDGE, TopAbs_FACE, m)
+        cand = None
+        for i in range(1, m.Extent() + 1):
+            fl = [TopoDS.Face_s(f) for f in m.FindFromIndex(i)]
+            if len(fl) != 2:
+                continue
+            types = [BRepAdaptor_Surface(f).GetType() for f in fl]
+            if types.count(GeomAbs_BSplineSurface) != 1:
+                continue
+            e = TopoDS.Edge_s(m.FindKey(i))
+            if BRep_Tool.Degenerated_s(e) or GCPnts_AbscissaPoint.Length_s(BRepAdaptor_Curve(e)) < 20:
+                continue
+            c = BRepAdaptor_Curve(e); p = c.Value((c.FirstParameter() + c.LastParameter()) / 2)
+            key = (round(p.X()), round(p.Y()), round(p.Z()))
+            if key in tried:
+                continue
+            cand = (e, key, r_arch if GeomAbs_Cylinder in types else r_open)
+            break
+        if cand is None:
+            break
+        e, key, r = cand
+        tried.add(key)
+        ok = False
+        while r >= min_r and not ok:
+            mf = BRepFilletAPI_MakeFillet(s); mf.Add(r, e)
+            try:
+                mf.Build(); ok = mf.IsDone() and valid(mf.Shape())
+            except Exception:
+                ok = False
+            if not ok:
+                r /= 2
+        if ok:
+            body.shape = mf.Shape(); done += 1
+            # fillet faces sit at the edge midpoint: remember them as tried
+            tried.add(key)
+        else:
+            failed += 1
+    body.tags = [(f, surf_tag[BRep_Tool.Surface_s(f)]) for f in faces(body.shape)
+                 if BRep_Tool.Surface_s(f) in surf_tag]
+    print("softened edges", done, "unfilleted", failed)
+    return body
+
+
 def y_prism(pts2d, corners, y0, y1):
     return outline_prism(pts2d, corners, 'xz', y0, y1)
 
@@ -158,7 +219,7 @@ def build():
     for sgn in (1, -1):
         body.cut(y_prism(*FT.SCOOP, sgn * 845, sgn * 1400), 'recess')
         body.cut(y_prism(*FT.SCOOP_IN, sgn * 660, sgn * 1400), 'dark')
-        body.cut(outline_prism(*FT.SILL, 'xz', sgn * 850, sgn * 1400), 'dark')
+        body.cut(outline_prism(*FT.SILL, 'xz', sgn * 820, sgn * 1400), 'dark')
     print("scoops", valid(body.shape))
     # rear recess + diffuser
     L = B.LENGTH
@@ -167,6 +228,8 @@ def build():
     if not valid(body.shape):
         body.fix()
     print("rear", valid(body.shape))
+    soften(body)
+    print("softened", valid(body.shape))
     # glazing and lamps are thin skins laid over the body (the body is not cut):
     # (outset loft  x  region)  minus  (body  x  region)
     def skin(region_ops, d):

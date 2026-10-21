@@ -14,7 +14,9 @@ def stations():
     return sorted(set(round(float(x), 2) for x in xs if x <= B.LENGTH))
 
 
-TAIL_R = 40.0   # rounded tail edge
+TAIL_R = 60.0   # quarter-round on the tail edge
+NOSE_R = 30.0   # quarter-round on the nose edge
+ROUND_BY_SECTIONS = False   # end rounding breaks the skin (see IMPROVEMENT_PLAN.md)
 
 
 def offset_loop(L, d):
@@ -31,13 +33,12 @@ def offset_loop(L, d):
     return np.c_[L[:, 0], Q]
 
 
-def tail_loops(base_loop):
-    """Quarter-round the tail: sections behind L - TAIL_R shrink like a fillet."""
+def end_loops(base_loop, x0, r, sign):
+    """Quarter-round an end: sections beyond x0 (towards sign) shrink like a fillet."""
     out = []
-    x0 = B.LENGTH - TAIL_R
-    for th in np.radians([30, 55, 75]):
-        x = x0 + TAIL_R * np.sin(th)
-        L = offset_loop(base_loop, TAIL_R * (1 - np.cos(th)))
+    for k in (0.25, 0.5, 0.75, 1.0):      # evenly spaced rows interpolate stably
+        x = x0 + sign * r * k
+        L = offset_loop(base_loop, r * (1 - np.sqrt(1 - (0.9 * k) ** 2)))
         L[:, 0] = x
         out.append((x, L))
     return out
@@ -67,7 +68,9 @@ def sample(c, n=500):
 
 
 def solve(extra=(), offset=0.0):
-    xs = stations() + [B.LENGTH] + list(extra)
+    ends = [B.LENGTH - TAIL_R, NOSE_R]
+    # stations crowding the end stations make the interpolation overshoot
+    xs = [x for x in stations() + list(extra) if min(abs(x - e) for e in ends) > 30] + ends + [B.LENGTH]
     xs = sorted(set(xs))
     loops = {x: B.full_loop(x) for x in xs}
     params = np.mean([chord_params(L) for L in loops.values()], axis=0)
@@ -85,6 +88,19 @@ def solve(extra=(), offset=0.0):
             e = B.SIL(x) - zmax
             dz[x] += e; worst = max(worst, abs(e)); curves[x] = c
         print("silhouette fit iter", it, "max err %.2f mm" % worst)
+    # rounded ends: replace the end stations with shrinking sections
+    for x0, r, sign in ((B.LENGTH - TAIL_R, TAIL_R, 1), (NOSE_R, NOSE_R, -1)):
+        base = (B.full_loop(x0, hc=B.canopy_height(x0) + dz.get(x0, 0.0)) if B.canopy_height(x0)
+                else B.full_loop(x0, dz=dz.get(x0, 0.0)))
+        if offset:
+            base = offset_loop(base, -offset)
+        for x in [x for x in xs if (x - x0) * sign > -1e-6]:
+            xs.remove(x); curves.pop(x, None)
+        xs.append(x0); curves[x0] = interp(base, params)
+        if ROUND_BY_SECTIONS:
+            for x, L in end_loops(base, x0, r, sign):
+                xs.append(x); curves[x] = interp(L, params)
+    xs.sort()
     return xs, curves
 
 

@@ -20,7 +20,7 @@ def _area(f):
     g = GProp_GProps(); BRepGProp.SurfaceProperties_s(f, g); return g.Mass()
 
 
-def skin_solid(grid, tol=0.3):
+def skin_solid(grid, tol=0.3, end_curves=None):
     """grid: (n_u, n_v, 3) points; rows are closed section loops (last == first)."""
     nu, nv, _ = grid.shape
     arr = TColgp_Array2OfPnt(1, nu, 1, nv)
@@ -34,8 +34,8 @@ def skin_solid(grid, tol=0.3):
     u0, u1, v0, v1 = surf.Bounds()
     sew = BRepBuilderAPI_Sewing(0.05)
     sew.Add(BRepBuilderAPI_MakeFace(surf, 1e-6).Face())
-    for u in (u0, u1):
-        # planar cap bounded by the surface's own end iso-curve
+    for k, u in enumerate((u0, u1)):
+        # planar cap bounded by the exact end section (or the surface's end iso-curve)
         iso = surf.UIso(u)
         w = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(iso).Edge()).Wire()
         x = iso.Value(iso.FirstParameter()).X()
@@ -46,7 +46,11 @@ def skin_solid(grid, tol=0.3):
         sew.Add(cap)
     sew.Perform()
     e = TopExp_Explorer(sew.SewedShape(), TopAbs_SHELL)
-    solid = BRepBuilderAPI_MakeSolid(TopoDS.Shell_s(e.Current())).Solid()
+    from OCP.ShapeFix import ShapeFix_Shell
+    from OCP.BRepLib import BRepLib
+    fs = ShapeFix_Shell(TopoDS.Shell_s(e.Current())); fs.Perform()
+    solid = BRepBuilderAPI_MakeSolid(fs.Shell()).Solid()
+    BRepLib.OrientClosedSolid_s(solid)
     fx = ShapeFix_Solid(solid); fx.Perform()
     f2 = ShapeFix_Shape(fx.Solid()); f2.Perform()
     return f2.Shape(), surf

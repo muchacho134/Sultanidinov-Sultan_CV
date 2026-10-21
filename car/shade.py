@@ -11,7 +11,7 @@ def rot(yaw, pitch):
     return Rx @ Rz
 
 
-def raster(V, F, C, R, W=900, H=420, pad=20):
+def raster(V, F, C, R, W=900, H=420, pad=20, N=None):
     """R maps world to camera: camera x right, y up, z towards viewer."""
     P = V @ R.T
     lo, hi = P[:, :2].min(0), P[:, :2].max(0)
@@ -26,6 +26,7 @@ def raster(V, F, C, R, W=900, H=420, pad=20):
     L = np.array([-0.35, 0.55, 0.75]); L /= np.linalg.norm(L)
     H2 = (L + np.array([0, 0, 1])); H2 /= np.linalg.norm(H2)
     diff = np.clip(ncam @ L, 0, 1); spec = np.clip(ncam @ H2, 0, 1) ** 40
+    Ncam = None if N is None else N @ R.T
     for k in range(len(F)):
         if ncam[k, 2] <= 0: continue
         i, j, l = F[k]
@@ -44,19 +45,35 @@ def raster(V, F, C, R, W=900, H=420, pad=20):
         sub = zb[y0:y1 + 1, x0:x1 + 1]
         m &= z > sub
         sub[m] = z[m]
-        col = C[k] * (0.28 + 0.62 * diff[k]) + 0.35 * spec[k]
-        img[y0:y1 + 1, x0:x1 + 1][m] = np.clip(col, 0, 1)
+        if Ncam is None:
+            col = C[k] * (0.28 + 0.62 * diff[k]) + 0.35 * spec[k]
+            img[y0:y1 + 1, x0:x1 + 1][m] = np.clip(col, 0, 1)
+        else:   # smooth (Phong) shading from interpolated vertex normals
+            nn = (a[m, None] * Ncam[i] + b[m, None] * Ncam[j] + c[m, None] * Ncam[l])
+            nn /= np.linalg.norm(nn, axis=1)[:, None] + 1e-12
+            d_ = np.clip(nn @ L, 0, 1); s_ = np.clip(nn @ H2, 0, 1) ** 60
+            env = 0.5 + 0.5 * nn[:, 1]          # soft sky/ground gradient
+            col = C[k] * (0.22 + 0.55 * d_ + 0.18 * env)[:, None] + 0.45 * s_[:, None]
+            img[y0:y1 + 1, x0:x1 + 1][m] = np.clip(col, 0, 1)
     return (img * 255).astype(np.uint8)
 
 
-def render_sheet(V, F, C, out):
+def vertex_normals(V, F):
+    T = V[F]; n = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+    N = np.zeros_like(V)
+    for k in range(3):
+        np.add.at(N, F[:, k], n)
+    return N / (np.linalg.norm(N, axis=1)[:, None] + 1e-12)
+
+
+def render_sheet(V, F, C, out, N=None, W=1100, H=500):
     views = [rot(0, -np.pi / 2),                     # side (from +y... looking along -y)
              rot(np.pi / 2, -np.pi / 2),             # front
              rot(-np.pi / 2, -np.pi / 2),            # rear
              rot(0, 0),                               # top
              rot(np.radians(35), -np.radians(65)),    # 3/4 front
              rot(np.radians(-150), -np.radians(68))]  # 3/4 rear
-    tiles = [raster(V, F, C, R) for R in views]
+    tiles = [raster(V, F, C, R, W, H, N=N) for R in views]
     rows = [np.concatenate(tiles[i:i + 2], 1) for i in range(0, 6, 2)]
     Image.fromarray(np.concatenate(rows, 0)).save(out)
 
