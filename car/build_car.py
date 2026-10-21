@@ -266,7 +266,11 @@ def build():
         s_ = skin([outline_prism(*FT.SILL_BLADE, 'xz', y0, y1)], 4.0)
         sill = s_ if sill is None else fuse(sill, s_)
     parts["Sill_blades"] = (sill, 'dark')
+    # tail light bar: a 5 mm plate on the flat rear face, plus a skin where it wraps the corners
     bar = skin([outline_prism(*FT.LIGHT_BAR, 'yz', L - 250, L + 50)], 4.0)
+    face_pts = [(max(-830.0, min(830.0, y)), z) for y, z in FT.LIGHT_BAR[0]]
+    plate = cut(outline_prism(face_pts, FT.LIGHT_BAR[1], 'yz', L - 2, L + 5), core)
+    bar = keep_solids(fuse(bar, plate) if volume(bar) > 0 else plate, 1e3)
     parts["Tail_light"] = (bar, 'red')
     for k, (s_, t) in parts.items():
         print("  %-15s valid %s  %.2f L" % (k, valid(s_), volume(s_) / 1e6))
