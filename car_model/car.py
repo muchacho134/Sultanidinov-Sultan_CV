@@ -10,39 +10,41 @@ import cadquery as cq
 from cadquery import Vector as V
 
 L, W, H = 5360.0, 2000.0, 1630.0
-XF, WB = 905.0, 3300.0
-XR = XF + WB                    # 4205
+# axle positions taken from the drawing itself (the 905/5300/1155 labels do not add up to 5360)
+XF, XR = 700.0, 4130.0
+WB = XR - XF
 TRACK_F, TRACK_R = 1620.0, 1630.0
-R_TIRE = 392.0                  # ~785 mm tyre (255/40 R22 class)
+R_TIRE = 395.0
 ZC = R_TIRE + 4.0               # 4 mm ground gap, like the reference
-R_ARCH = 455.0
+R_ARCH = 445.0
 X0 = 50.0                       # body skin starts here; grille stands proud to X=0
 
 def P(xs, ys):
     return PchipInterpolator(np.array(xs, float), np.array(ys, float))
 
-# ---- longitudinal control curves -------------------------------------------------
-# top centre line: blunt nose -> long flat hood -> raked screen -> flat roof -> fastback-ish C pillar -> deck
-zt = P([0, 40, 150, 700, 1350, 1480, 1700, 1950, 2200, 2450, 2800, 3500, 3800, 4050, 4300, 4520, 4650, 4950, 5250, 5330, 5360],
-       [940, 985, 1012, 1028, 1050, 1075, 1215, 1405, 1545, 1608, 1630, 1628, 1612, 1540, 1385, 1205, 1125, 1105, 1090, 1070, 1040])
-# shoulder / waist (widest point of the section, just under the belt line)
-zs = P([0, 60, 400, 1400, 2100, 4000, 4600, 5100, 5300, 5360],
-       [860, 900, 935, 975, 1030, 1040, 1010, 975, 930, 900])
+# ---- longitudinal control curves (measured off the blueprint side / top views) ------
+# top centre line: upright nose, hood rising to the cowl, raked screen, long flat roof,
+# backlight, deck falling gently to the tail
+zt = P([0, 40, 150, 600, 1000, 1300, 1380, 1600, 1850, 2050, 2300, 2600, 3300, 3800, 4000, 4200, 4450, 4630, 4800, 5100, 5300, 5340, 5360],
+       [930, 975, 1000, 1050, 1095, 1130, 1160, 1300, 1450, 1560, 1615, 1632, 1632, 1620, 1590, 1480, 1300, 1190, 1165, 1120, 1080, 1050, 1000])
+# shoulder: top of the lower body, just under the belt line
+zs = P([0, 100, 600, 1300, 2000, 4000, 4600, 5100, 5300, 5360],
+       [850, 920, 980, 1045, 1060, 1060, 1050, 1010, 960, 900])
 # underside
-zb = P([0, 60, 250, 600, 4700, 5100, 5300, 5360],
-       [270, 215, 180, 165, 165, 190, 240, 275])
-# half width of the lower body (plan view)
-hw = P([0, 40, 150, 350, 700, 4600, 5000, 5220, 5320, 5360],
-       [905, 935, 972, 993, 1000, 1000, 992, 965, 925, 895])
-# half width at the top surface (hood crown edge / roof rail / deck edge)
-hwt = P([0, 300, 1350, 1480, 1800, 2300, 2800, 3700, 4100, 4550, 4700, 5100, 5360],
-        [760, 810, 845, 835, 760, 690, 680, 680, 700, 800, 830, 820, 760])
+zb = P([0, 60, 300, 700, 1200, 3800, 4600, 5100, 5300, 5360],
+       [260, 235, 210, 185, 180, 180, 195, 235, 265, 290])
+# maximum half width of the lower body (plan view, rounded corners front and rear)
+hw = P([0, 30, 80, 150, 250, 400, 700, 1600, 2600, 3600, 4200, 4800, 5000, 5150, 5260, 5330, 5360],
+       [720, 790, 850, 905, 950, 985, 1000, 995, 990, 995, 1000, 990, 975, 940, 890, 830, 760])
+# half width at the top: hood edge / roof rail / deck edge
+hwt = P([0, 200, 800, 1300, 1380, 1700, 2100, 2500, 3500, 3900, 4200, 4630, 5000, 5250, 5360],
+        [700, 790, 850, 840, 800, 740, 660, 640, 640, 655, 700, 780, 800, 760, 700])
 
-N_STATIONS = 30
+N_STATIONS = 36
 def stations():
     # denser at both ends where the shape changes fastest
     t = np.linspace(0, 1, N_STATIONS)
-    s = t - 0.06 * np.sin(2 * np.pi * t)
+    s = t - 0.08 * np.sin(2 * np.pi * t)
     return np.clip(s * L, 0, L)
 
 def rounded_poly(verts, radii, nseg):
@@ -82,16 +84,23 @@ def rounded_poly(verts, radii, nseg):
     out.append(v[-1])
     return out
 
-def section_pts(x):
+def section_geom(x):
     b, s, t = float(zb(x)), float(zs(x)), float(zt(x))
     w, wt = float(hw(x)), float(hwt(x))
     dz = max(t - s, 40.0)
-    crown = min(0.06 * dz, 28.0) + 6.0
+    crown = min(0.08 * dz, 45.0) + 8.0
+    rail = (wt, t - crown)
+    sh = (w - 70, s)
+    belt = (sh[0] + 0.12 * (rail[0] - sh[0]), sh[1] + 0.12 * (rail[1] - sh[1]))
+    return b, s, t, w, wt, dz, crown, belt, rail
+
+def section_pts(x):
+    b, s, t, w, wt, dz, crown, belt, rail = section_geom(x)
     hb = s - b
-    shelf = w - min(0.22 * (w - wt), 75.0)
-    verts = [(0.0, b), (w - 45, b), (w, b + 0.33 * hb), (w, s), (shelf, s + 0.12 * dz), (wt, t - crown), (0.0, t)]
-    radii = [0, 95, 400, 40, 60, min(0.42 * dz, 105), 0]
-    nseg = [4, 5, 4, 4, 3, 3, 2, 3, 5, 4, 5]
+    # lower body bulges at about door-handle-minus height and leans inward to the shoulder
+    verts = [(0.0, b), (w - 40, b), (w, b + 0.45 * hb), (w - 70, s), rail, (0.0, t)]
+    radii = [0, 150, 1500, 130, min(0.4 * dz, 140), 0]
+    nseg = [3, 5, 3, 6, 4, 5, 6, 5, 6]
     half = rounded_poly(verts, radii, nseg)
     half = [(float(y), float(z)) for y, z in half]
     pts = half + [(-y, z) for (y, z) in reversed(half[1:-1])]
@@ -140,19 +149,17 @@ def wheel_wells():
     return tools
 
 def side_windows():
-    """Daylight openings: three panes per side (front door, rear door, quarter)."""
-    panes = [(1640, 2935), (3015, 3905), (3965, 4440)]
+    """Daylight openings: front door, rear door, quarter light (X ranges read off the side view)."""
+    panes = [(1400, 2630), (2715, 3545), (3610, 3900)]
     out = []
     for xa, xb in panes:
         xs = np.linspace(xa, xb, 40)
-        top = [float(zt(x)) - 70 for x in xs]
-        bot = [float(zs(x)) + 0.12 * max(float(zt(x) - zs(x)), 40) + 22 for x in xs]
-        pts = [(x, z) for x, z, zb_ in zip(xs, top, bot) if z - zb_ > 25]
-        if len(pts) < 3:
+        top = [float(zt(x)) - 75 for x in xs]
+        bot = [section_geom(x)[7][1] + 15 for x in xs]
+        keep = [(x, zt_, zb_) for x, zt_, zb_ in zip(xs, top, bot) if zt_ - zb_ > 25]
+        if len(keep) < 3:
             continue
-        xs_ok = [p[0] for p in pts]
-        poly = pts + [(x, float(zs(x)) + 0.12 * max(float(zt(x) - zs(x)), 40) + 22) for x in reversed(xs_ok)]
-        out.append(poly)
+        out.append([(x, z) for x, z, _ in keep] + [(x, z) for x, _, z in reversed(keep)])
     return out
 
 def halfspace_x_axis(p, n, x0=0.0, x1=L):
@@ -171,10 +178,8 @@ def glass_recesses(body, depth=9.0):
     tools = []
     for poly in side_windows():
         xm = 0.5 * (min(x for x, _ in poly) + max(x for x, _ in poly))
-        s, t, w, wt = float(zs(xm)), float(zt(xm)), float(hw(xm)), float(hwt(xm))
-        dz = t - s
-        a = np.array([w - min(0.22 * (w - wt), 75.0), s + 0.12 * dz])
-        bpt = np.array([wt, t - 0.12 * dz])
+        g = section_geom(xm)
+        a = np.array(g[7]); bpt = np.array(g[8])
         d = (bpt - a) / np.linalg.norm(bpt - a)
         n = np.array([d[1], -d[0]])
         if n[0] < 0: n = -n
@@ -184,7 +189,7 @@ def glass_recesses(body, depth=9.0):
             hs = halfspace_x_axis(p, n)
             tool = pr.intersect(hs)
             tools.append(tool if sg > 0 else tool.mirror("XZ"))
-    for xa, xb, fwd in ((1560, 2240, True), (3900, 4480, False)):
+    for xa, xb, fwd in ((1450, 2200, True), (4080, 4560, False)):
         pa = np.array([xa, float(zt(xa))]); pb = np.array([xb, float(zt(xb))])
         d = (pb - pa) / np.linalg.norm(pb - pa)
         n = np.array([-d[1], d[0]])
@@ -198,50 +203,84 @@ def glass_recesses(body, depth=9.0):
     return tools
 
 def grille():
-    gw, z0, z1 = 470.0, 330.0, 975.0
+    gw, z0, z1 = 515.0, 325.0, 968.0
     frame = cq.Workplane().add(box(0, 140, -gw, gw, z0, z1)).edges("|Y").fillet(18).edges("|X").fillet(10).val()
-    frame = frame.cut(box(-1, 32, -gw + 38, gw - 38, z0 + 40, z1 - 40))
+    frame = frame.cut(box(-1, 32, -gw + 36, gw - 36, z0 + 38, z1 - 38))
     vanes = []
-    n = 21
-    pitch = (2 * (gw - 38)) / n
+    n = 23
+    pitch = (2 * (gw - 36)) / n
     for i in range(n):
-        yc = -gw + 38 + pitch * (i + 0.5)
-        vanes.append(box(8, 40, yc - 6.5, yc + 6.5, z0 + 40, z1 - 40))
-    frame = fuse_all(frame, vanes)
-    return frame
+        yc = -gw + 36 + pitch * (i + 0.5)
+        vanes.append(box(8, 40, yc - 6.5, yc + 6.5, z0 + 38, z1 - 38))
+    return fuse_all(frame, vanes)
 
 def mirrors():
     out = []
     for sg in (1, -1):
-        m = box(1650, 1850, 880, 1080, 1150, 1270)
+        m = box(1600, 1790, 880, 1095, 1135, 1250).fuse(box(1620, 1740, 700, 900, 1150, 1200))
         out.append(m if sg > 0 else m.mirror("XZ"))
     return out
 
+def x_surface(y, front=True):
+    """Plan-view X of the lower body skin at half-width y (front or rear end)."""
+    xs = np.linspace(0, 900, 901) if front else np.linspace(L, L - 900, 901)
+    w = hw(xs)
+    i = int(np.argmax(w >= y)) if (w >= y).any() else len(xs) - 1
+    return X0 + xs[i] * (L - X0) / L
+
+def plan_recess(y0, y1, z0, z1, depth, front=True):
+    """Pocket of roughly constant depth into the rounded front/rear corners."""
+    ys = np.linspace(y0, y1, 12)
+    if front:
+        inner = [(x_surface(y) + depth, y) for y in ys]
+        poly = [(-20.0, y0)] + inner + [(-20.0, y1)]
+    else:
+        inner = [(x_surface(y, False) - depth, y) for y in ys]
+        poly = [(L + 20.0, y0)] + inner + [(L + 20.0, y1)]
+    return cq.Workplane("XY", origin=(0, 0, z0)).polyline(poly).close().extrude(z1 - z0).val()
+
 def light_recesses():
     t = []
-    # headlamps: slim horizontal slots, plus vertical air curtains below
     for sg in (1, -1):
-        y0, y1 = 545.0, 865.0
-        t.append(box(-10, X0 + 75, *sorted((sg * y0, sg * y1)), 790, 850))
-        t.append(box(-10, X0 + 60, *sorted((sg * 770, sg * 845)), 360, 690))
-        # rear lamp frame: top bar + vertical bars
-        t.append(box(L - 22, L + 10, *sorted((sg * 0, sg * 845)), 955, 1000))
-        t.append(box(L - 22, L + 10, *sorted((sg * 795, sg * 845)), 600, 1000))
-        # exhaust finishers
-        t.append(box(L - 45, L + 10, *sorted((sg * 330, sg * 610)), 315, 350))
-        # door shut-lines and handle pockets
-    t.append(box(L - 10, L + 10, -300, 300, 690, 900))     # plate panel
+        m = (lambda s: s) if sg > 0 else (lambda s: s.mirror("XZ"))
+        t.append(m(plan_recess(556, 900, 748, 852, 45)))            # headlamp slot
+        t.append(m(plan_recess(834, 905, 265, 660, 40)))            # vertical air curtain
+        t.append(m(plan_recess(0, 815, 905, 990, 22, False)))      # rear lamp top bar
+        t.append(m(plan_recess(660, 815, 557, 990, 22, False)))    # rear lamp vertical bar
+        t.append(m(plan_recess(462, 720, 300, 360, 45, False)))    # exhaust finisher
+    t.append(box(L - 8, L + 10, -650, 650, 600, 895))             # recessed tail panel
+    t.append(box(-10, X0 + 8, -480, 480, 270, 312))               # lower intake below grille
     return t
+
+def skin_y(x, z):
+    """Half width of the section skin at height z on the outer side (below the roof rail)."""
+    pts = [(p.y, p.z) for p in section_pts(x)]
+    n = len(pts)
+    right = [q for q in pts[:n // 2 + 1] if q[0] >= 0]
+    top_i = int(np.argmax([q[0] for q in right]))
+    # walk up from the widest point toward the rail / down toward the floor
+    lower = sorted(right[:top_i + 1], key=lambda q: q[1])
+    upper = sorted(right[top_i:], key=lambda q: q[1])
+    seq = upper if z >= right[top_i][1] else lower
+    return float(np.interp(z, [q[1] for q in seq], [q[0] for q in seq]))
+
+def groove(xl, z0, z1, depth=6.0, width=5.0):
+    zz = np.linspace(z0, z1, 14)
+    outer = [(skin_y(xl, z) + 60, z) for z in zz]
+    inner = [(skin_y(xl, z) - depth, z) for z in reversed(zz)]
+    w = cq.Workplane("YZ", origin=(xl - width / 2, 0, 0)).polyline(outer + inner).close()
+    return w.extrude(width).val()
 
 def shut_lines():
     t = []
-    for xl in (1610, 2975, 3690):
-        for sg in (1, -1):
-            zt_ = float(zs(xl)) + 8
-            t.append(box(xl - 2.5, xl + 2.5, *sorted((sg * (float(hw(xl)) - 6), sg * 1200)), 240, zt_))
-    for xh in (2450, 3440):
-        for sg in (1, -1):
-            t.append(box(xh, xh + 170, *sorted((sg * (float(hw(xh)) - 6), sg * 1200)), 965, 990))
+    for xl in (1360, 2600, 3690):
+        top = section_geom(xl)[7][1] - 5
+        g = groove(xl, 240, top)
+        t += [g, g.mirror("XZ")]
+    for xh in (2300, 3320):
+        y = skin_y(xh + 85, 1017)
+        h = box(xh, xh + 170, y - 8, y + 80, 1005, 1030)
+        t += [h, h.mirror("XZ")]
     return t
 
 def body():
