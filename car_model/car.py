@@ -22,23 +22,24 @@ X0 = 50.0                       # body skin starts here; grille stands proud to 
 def P(xs, ys):
     return PchipInterpolator(np.array(xs, float), np.array(ys, float))
 
-# ---- longitudinal control curves (measured off the blueprint side / top views) ------
-# top centre line: upright nose, hood rising to the cowl, raked screen, long flat roof,
-# backlight, deck falling gently to the tail
+# ---- longitudinal control curves -------------------------------------------------
+# Heights/widths traced off the concept's side, front, rear and top views, with each view's
+# axes scaled to the labelled 5360 x 2000 x 1630 envelope.
+# top centre line: hood leading edge, hood rising to the cowl, screen, roof, backlight, deck
 zt = P([0, 40, 150, 600, 1000, 1300, 1380, 1600, 1850, 2050, 2300, 2600, 3300, 3800, 4000, 4200, 4450, 4630, 4800, 5100, 5300, 5340, 5360],
-       [930, 975, 1000, 1050, 1095, 1130, 1160, 1300, 1450, 1560, 1615, 1632, 1632, 1620, 1590, 1480, 1300, 1190, 1165, 1120, 1080, 1050, 1000])
-# shoulder: top of the lower body, just under the belt line
+       [975, 995, 1005, 1040, 1080, 1105, 1125, 1290, 1445, 1560, 1615, 1632, 1632, 1620, 1590, 1480, 1300, 1195, 1172, 1140, 1112, 1085, 1045])
+# shoulder top / shelf height (fenders, waist, rear haunches)
 zs = P([0, 100, 600, 1300, 2000, 4000, 4600, 5100, 5300, 5360],
-       [850, 920, 980, 1045, 1060, 1060, 1050, 1010, 960, 900])
-# underside
+       [955, 985, 1030, 1080, 1090, 1090, 1085, 1070, 1045, 1005])
+# underside: low front bumper, sill, rear bumper
 zb = P([0, 60, 300, 700, 1200, 3800, 4600, 5100, 5300, 5360],
-       [260, 235, 210, 185, 180, 180, 195, 235, 265, 290])
-# maximum half width of the lower body (plan view, rounded corners front and rear)
-hw = P([0, 30, 80, 150, 250, 400, 700, 1600, 2600, 3600, 4200, 4800, 5000, 5150, 5260, 5330, 5360],
-       [720, 790, 850, 905, 950, 985, 1000, 995, 990, 995, 1000, 990, 975, 940, 890, 830, 760])
-# half width at the top: hood edge / roof rail / deck edge
-hwt = P([0, 200, 800, 1300, 1380, 1700, 2100, 2500, 3500, 3900, 4200, 4630, 5000, 5250, 5360],
-        [700, 790, 850, 840, 800, 740, 660, 640, 640, 655, 700, 780, 800, 760, 700])
+       [175, 140, 130, 170, 180, 180, 180, 155, 150, 175])
+# maximum half width (plan view): full 2000 between tight, rounded corners
+hw = P([0, 30, 100, 200, 400, 700, 1600, 2600, 3600, 4200, 4800, 5000, 5150, 5260, 5320, 5350, 5360],
+       [745, 805, 900, 955, 990, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 992, 965, 925, 870, 830])
+# half width at the top surface: hood / roof rail / deck (kept inside the shoulder shelf)
+hwt = P([0, 300, 1300, 1380, 1700, 2100, 2500, 3500, 3900, 4200, 4630, 5000, 5300, 5360],
+        [600, 680, 760, 780, 750, 690, 680, 680, 690, 715, 730, 740, 720, 680])
 
 N_STATIONS = 36
 def stations():
@@ -86,21 +87,23 @@ def rounded_poly(verts, radii, nseg):
 
 def section_geom(x):
     b, s, t = float(zb(x)), float(zs(x)), float(zt(x))
-    w, wt = float(hw(x)), float(hwt(x))
+    w = float(hw(x))
     dz = max(t - s, 40.0)
     crown = min(0.08 * dz, 45.0) + 8.0
+    inset = min(200.0, 0.2 * w)                 # width of the shoulder shelf
+    shelf = (w - inset, s + 15)
+    wt = min(float(hwt(x)), shelf[0] - 60)
     rail = (wt, t - crown)
-    sh = (w - 70, s)
-    belt = (sh[0] + 0.12 * (rail[0] - sh[0]), sh[1] + 0.12 * (rail[1] - sh[1]))
-    return b, s, t, w, wt, dz, crown, belt, rail
+    return b, s, t, w, wt, dz, crown, shelf, rail
 
 def section_pts(x):
-    b, s, t, w, wt, dz, crown, belt, rail = section_geom(x)
-    hb = s - b
-    # lower body bulges at about door-handle-minus height and leans inward to the shoulder
-    verts = [(0.0, b), (w - 40, b), (w, b + 0.45 * hb), (w - 70, s), rail, (0.0, t)]
-    radii = [0, 150, 1500, 130, min(0.4 * dz, 140), 0]
-    nseg = [3, 5, 3, 6, 4, 5, 6, 5, 6]
+    b, s, t, w, wt, dz, crown, shelf, rail = section_geom(x)
+    k = shelf[0] / (w - 200) if w > 1000 else (w - shelf[0]) / 200.0   # shrink the shoulder at the ends
+    # full-width, upright lower body; big rounded shoulder up to a flat shelf; cabin on the shelf
+    verts = [(0.0, b), (w - 20, b), (w, s - 250 * k), (w - 15 * k, s - 130 * k), (w - 60 * k, s - 50 * k),
+             (w - 120 * k, s), shelf, rail, (0.0, t)]
+    radii = [0, 110, 260, 140, 90, 60, 35, min(0.4 * dz, 110), 0]
+    nseg = [3, 5, 4, 3, 3, 3, 2, 3, 2, 3, 2, 3, 3, 5, 5]
     half = rounded_poly(verts, radii, nseg)
     half = [(float(y), float(z)) for y, z in half]
     pts = half + [(-y, z) for (y, z) in reversed(half[1:-1])]
@@ -122,11 +125,24 @@ def both(f):
     """f(sign) -> solid; returns list for left and right."""
     return [f(1), f(-1)]
 
+def _bop(op, s, tools):
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    from OCP.TopTools import TopTools_ListOfShape
+    args, tl = TopTools_ListOfShape(), TopTools_ListOfShape()
+    args.Append(s.wrapped)
+    for t in tools:
+        tl.Append(t.wrapped)
+    b = BRepAlgoAPI_Cut() if op == "cut" else BRepAlgoAPI_Fuse()
+    b.SetArguments(args); b.SetTools(tl)
+    b.SetRunParallel(True)
+    b.Build()
+    return cq.Shape.cast(b.Shape())
+
 def cut_all(s, tools):
-    return s.cut(*tools) if tools else s
+    return _bop("cut", s, tools) if tools else s
 
 def fuse_all(s, tools):
-    return s.fuse(*tools).clean() if tools else s
+    return _bop("fuse", s, tools).clean() if tools else s
 
 def scaled_y(shape, k):
     from OCP.gp import gp_GTrsf, gp_Mat, gp_XYZ
@@ -202,17 +218,35 @@ def glass_recesses(body, depth=9.0):
         tools.append(pr.intersect(halfspace_y_axis(p, n)))
     return tools
 
+def yz_prism(poly, x0, x1):
+    return cq.Workplane("YZ", origin=(x0, 0, 0)).polyline(poly).close().extrude(x1 - x0).val()
+
+def rrect(y0, y1, z0, z1, r, n=4):
+    """Rounded rectangle in the YZ plane as a polygon."""
+    r = min(r, 0.49 * (y1 - y0), 0.49 * (z1 - z0))
+    pts = []
+    for cy, cz, a0 in ((y1 - r, z0 + r, -90), (y1 - r, z1 - r, 0), (y0 + r, z1 - r, 90), (y0 + r, z0 + r, 180)):
+        for j in range(n + 1):
+            a = math.radians(a0 + 90 * j / n)
+            pts.append((cy + r * math.cos(a), cz + r * math.sin(a)))
+    return pts
+
 def grille():
-    gw, z0, z1 = 515.0, 325.0, 968.0
-    frame = cq.Workplane().add(box(0, 140, -gw, gw, z0, z1)).edges("|Y").fillet(18).edges("|X").fillet(10).val()
-    frame = frame.cut(box(-1, 32, -gw + 36, gw - 36, z0 + 38, z1 - 38))
-    vanes = []
-    n = 23
-    pitch = (2 * (gw - 36)) / n
-    for i in range(n):
-        yc = -gw + 36 + pitch * (i + 0.5)
-        vanes.append(box(8, 40, yc - 6.5, yc + 6.5, z0 + 38, z1 - 38))
-    return fuse_all(frame, vanes)
+    """Upright grille shell: arched-top surround, 17 vanes and a centre bar, standing proud."""
+    zc = lambda y, top: top - 25 * (y / 545.0) ** 2          # gently arched top edge
+    ys = np.linspace(-545, 545, 23)
+    outer = [(545, 340)] + [(y, zc(y, 965)) for y in ys[::-1]] + [(-545, 340)]
+    yi = np.linspace(-495, 495, 23)
+    inner = [(495, 365)] + [(y, zc(y, 908)) for y in yi[::-1]] + [(-495, 365)]
+    shell = yz_prism(outer, 0, 160)
+    pocket = yz_prism(inner, -1, 40)
+    shell = shell.cut(pocket)
+    bars = []
+    for k in range(-8, 9):
+        w2, xf = (11, 4) if k == 0 else (8, 10)
+        bars.append(box(xf, 42, 55 * k - w2, 55 * k + w2, 360, 960))
+    bars = cq.Compound.makeCompound(bars).intersect(yz_prism(inner, 0, 45))
+    return shell.fuse(bars).clean()
 
 def mirrors():
     out = []
@@ -221,48 +255,112 @@ def mirrors():
         out.append(m if sg > 0 else m.mirror("XZ"))
     return out
 
-def x_surface(y, front=True):
-    """Plan-view X of the lower body skin at half-width y (front or rear end)."""
-    xs = np.linspace(0, 900, 901) if front else np.linspace(L, L - 900, 901)
-    w = hw(xs)
-    i = int(np.argmax(w >= y)) if (w >= y).any() else len(xs) - 1
-    return X0 + xs[i] * (L - X0) / L
-
-def plan_recess(y0, y1, z0, z1, depth, front=True):
-    """Pocket of roughly constant depth into the rounded front/rear corners."""
-    ys = np.linspace(y0, y1, 12)
-    if front:
-        inner = [(x_surface(y) + depth, y) for y in ys]
-        poly = [(-20.0, y0)] + inner + [(-20.0, y1)]
+_XS = {}
+def x_surface(y, z, front=True):
+    """World X of the body skin at half-width |y| and height z near the front / rear end."""
+    key = front
+    if key not in _XS:
+        xs = np.linspace(0, 1100, 111) if front else np.linspace(L, L - 1100, 111)
+        zz = np.arange(100, 1201, 20.0)
+        tab = np.array([[skin_y(x, z_) for z_ in zz] for x in xs])
+        _XS[key] = (xs, zz, tab)
+    xs, zz, tab = _XS[key]
+    col = np.array([np.interp(z, zz, tab[i]) for i in range(len(xs))])
+    y = abs(y)
+    ok = np.nonzero(col >= y)[0]
+    i = ok[0] if len(ok) else len(xs) - 1
+    if 0 < i < len(xs):                              # linear refine between stations
+        c0, c1 = col[i - 1], col[i]
+        f = (y - c0) / (c1 - c0) if c1 != c0 else 1.0
+        xr = xs[i - 1] + (xs[i] - xs[i - 1]) * np.clip(f, 0, 1)
     else:
-        inner = [(x_surface(y, False) - depth, y) for y in ys]
-        poly = [(L + 20.0, y0)] + inner + [(L + 20.0, y1)]
-    return cq.Workplane("XY", origin=(0, 0, z0)).polyline(poly).close().extrude(z1 - z0).val()
+        xr = xs[i]
+    return X0 + xr * (L - X0) / L
+
+def skin_region(y0, y1, z0, z1, d0, d1, front=True, nz=5, ny=20):
+    """Solid between depth d0 and d1 under the front/rear skin (negative d = outside)."""
+    sg = 1 if front else -1
+    wires = []
+    for z in np.linspace(z0, z1, nz):
+        ys = np.linspace(y0, y1, ny)
+        outer = [(x_surface(y, z, front) + sg * d0, y) for y in ys]
+        inner = [(x_surface(y, z, front) + sg * d1, y) for y in ys[::-1]]
+        wires.append(cq.Wire.makePolygon([V(x, y, z) for x, y in outer + inner], close=True))
+    return cq.Solid.makeLoft(wires, ruled=True)
+
+def pocket(poly, depth, front=True, d0=-30.0):
+    """Recess with a YZ outline whose floor follows the skin at the given depth."""
+    ys = [p[0] for p in poly]; zs_ = [p[1] for p in poly]
+    reg = skin_region(min(ys) - 5, max(ys) + 5, min(zs_) - 5, max(zs_) + 5, d0, depth, front)
+    x0, x1 = (-100, 700) if front else (L - 700, L + 100)
+    return reg.intersect(yz_prism(poly, x0, x1))
+
+def layer(poly, d0, d1, front=True):
+    """Solid with a YZ outline between depths d0 and d1 (lenses, trims; d0 < 0 stands proud)."""
+    return pocket(poly, d1, front, d0)
+
+def mir(shapes):
+    return shapes + [t.mirror("XZ") for t in shapes]
+
+def hexagon_exhaust(inset=0.0):
+    pts = [(470, 335), (800, 335), (788, 250), (522, 240), (470, 300)]
+    cy = sum(p[0] for p in pts) / 5; cz = sum(p[1] for p in pts) / 5
+    return [(cy + (y - cy) * (1 - inset), cz + (z - cz) * (1 - inset)) for y, z in pts]
 
 def light_recesses():
     t = []
-    for sg in (1, -1):
-        m = (lambda s: s) if sg > 0 else (lambda s: s.mirror("XZ"))
-        t.append(m(plan_recess(556, 900, 748, 852, 45)))            # headlamp slot
-        t.append(m(plan_recess(834, 905, 265, 660, 40)))            # vertical air curtain
-        t.append(m(plan_recess(0, 815, 905, 990, 22, False)))      # rear lamp top bar
-        t.append(m(plan_recess(660, 815, 557, 990, 22, False)))    # rear lamp vertical bar
-        t.append(m(plan_recess(462, 720, 300, 360, 45, False)))    # exhaust finisher
-    t.append(box(L - 8, L + 10, -650, 650, 600, 895))             # recessed tail panel
-    t.append(box(-10, X0 + 8, -480, 480, 270, 312))               # lower intake below grille
+    # ---- front ----
+    t += mir([pocket(rrect(563, 910, 740, 862, 32), 40)])                   # headlamp housing
+    t += mir([pocket(rrect(825, 911, 280, 690, 34), 12),                    # intake surround
+              pocket(rrect(843, 893, 300, 670, 22), 55)])                   # intake opening
+    t.append(pocket(rrect(-500, 500, 205, 338, 18), 28))                    # lower grille band
+    t += mir([pocket([(553, 345), (559, 345), (567, 735), (561, 735)], 4)])  # bumper pod line
+    # ---- rear ----
+    ubar = [(842, 545), (842, 990), (-842, 990), (-842, 545), (-671, 545), (-671, 910), (671, 910), (671, 545)]
+    t.append(pocket(ubar, 30, False))                                       # tail lamp housing
+    t.append(pocket(rrect(-660, 660, 640, 905, 12), 7, False))              # recessed centre panel
+    t.append(pocket(rrect(-905, 905, 499, 505, 2), 4, False))               # bumper crease
+    t.append(pocket(rrect(-790, 790, 190, 350, 30), 22, False))             # diffuser band
+    t += mir([pocket(hexagon_exhaust(), 60, False)])                        # exhaust
+    t += mir([pocket([(677, 990), (683, 990), (683, 1070), (677, 1070)], 4, False)])   # boot lid line
+    return t
+
+def hood_lines():
+    """Hood shut-lines running from the grille shoulders back to the cowl."""
+    t = []
+    xs = np.linspace(160, 1320, 14)
+    yl = np.interp(xs, [160, 1320], [560, 700])
+    wires = []
+    for x, y in zip(xs, yl):
+        top = [(p.y, p.z) for p in section_pts((x - X0) * L / (L - X0))]
+        top = top[:len(top) // 2 + 1]
+        top = [q for q in top if q[1] > float(zs((x - X0) * L / (L - X0))) - 5]
+        zq = float(np.interp(y, [q[0] for q in reversed(top)], [q[1] for q in reversed(top)]))
+        pts = [V(x, y - 3, zq - 4), V(x, y + 3, zq - 4), V(x, y + 3, zq + 80), V(x, y - 3, zq + 80)]
+        wires.append(cq.Wire.makePolygon(pts, close=True))
+    g = cq.Solid.makeLoft(wires, ruled=False)
+    return [g, g.mirror("XZ")]
+
+def lamp_lenses():
+    t = []
+    t += mir([layer(rrect(583, 890, 760, 842, 22), 16, 45)])                # headlamp inner lens
+    t += mir([layer(rrect(600, 895, 185, 203, 8), -5, 12)])                 # chrome lower-corner strip
+    # tail lamp light guide: a U strip floating inside the housing
+    guide = [(800, 572), (800, 962), (-800, 962), (-800, 572), (-772, 572), (-772, 940), (772, 940), (772, 572)]
+    t.append(layer(guide, 12, 34, False))
+    t += mir([layer(hexagon_exhaust(-0.06), 14, 30, False).cut(pocket(hexagon_exhaust(0.08), 70, False))])  # exhaust surround
+    t.append(layer(rrect(-480, 480, 282, 292, 4), 10, 30))                  # lower band slats
+    t.append(layer(rrect(-480, 480, 242, 252, 4), 10, 30))
     return t
 
 def skin_y(x, z):
-    """Half width of the section skin at height z on the outer side (below the roof rail)."""
+    """Half width of the section skin at height z on the outer side (z below the shelf)."""
     pts = [(p.y, p.z) for p in section_pts(x)]
-    n = len(pts)
-    right = [q for q in pts[:n // 2 + 1] if q[0] >= 0]
-    top_i = int(np.argmax([q[0] for q in right]))
-    # walk up from the widest point toward the rail / down toward the floor
-    lower = sorted(right[:top_i + 1], key=lambda q: q[1])
-    upper = sorted(right[top_i:], key=lambda q: q[1])
-    seq = upper if z >= right[top_i][1] else lower
-    return float(np.interp(z, [q[1] for q in seq], [q[0] for q in seq]))
+    right = pts[:len(pts) // 2 + 1]
+    for (ya, za), (yb, zb_) in zip(right[:-1], right[1:]):
+        if za <= z <= zb_ and zb_ > za:
+            return ya + (yb - ya) * (z - za) / (zb_ - za)
+    return max(q[0] for q in right)
 
 def groove(xl, z0, z1, depth=6.0, width=5.0):
     zz = np.linspace(z0, z1, 14)
@@ -310,37 +408,7 @@ def feature_lines():
     # lower door character line (chrome sill strip)
     xs = np.linspace(1180, 3660, 9)
     t += side_line(xs, [330.0] * len(xs), h=10, depth=3)
-    # rear: lower chrome strip across the bumper
-    t.append(box(L - 4, L + 10, -700, 700, 440, 450))
     return t
-
-def plan_band(y0, y1, z0, z1, d0, d1, front=True):
-    """Solid between depth d0 and d1 below the rounded front/rear skin (a lamp lens)."""
-    ys = np.linspace(y0, y1, 12)
-    if front:
-        outer = [(x_surface(y) + d0, y) for y in ys]
-        inner = [(x_surface(y) + d1, y) for y in reversed(ys)]
-    else:
-        outer = [(x_surface(y, False) - d0, y) for y in ys]
-        inner = [(x_surface(y, False) - d1, y) for y in reversed(ys)]
-    return cq.Workplane("XY", origin=(0, 0, z0)).polyline(outer + inner).close().extrude(z1 - z0).val()
-
-def lamp_lenses():
-    t = []
-    for sg in (1, -1):
-        m = (lambda s: s) if sg > 0 else (lambda s: s.mirror("XZ"))
-        t.append(m(plan_band(585, 880, 763, 837, 22, 50)))            # headlamp inner lens
-        t.append(m(plan_band(20, 790, 918, 977, 10, 26, False)))      # rear lamp bar lens
-        t.append(m(plan_band(675, 800, 575, 975, 10, 26, False)))     # rear lamp upright lens
-    return t
-
-def ornament():
-    """Stylised hood mascot on the grille shell."""
-    base = box(150, 230, -22, 22, 955, 990)
-    fig = xz_prism([(165, 985), (215, 985), (205, 1035), (185, 1100), (172, 1095), (180, 1040)], -9, 9)
-    wing = cq.Workplane("YZ", origin=(178, 0, 0)).polyline(
-        [(-8, 1030), (8, 1030), (38, 1085), (30, 1092), (0, 1060), (-30, 1092), (-38, 1085)]).close().extrude(22).val()
-    return base.fuse(fig, wing).clean()
 
 def roof_fin():
     x0 = 3820.0
@@ -353,9 +421,14 @@ def body():
     b = body_loft()
     print("loft", b.isValid(), time.time()-T, flush=True)
     rec = glass_recesses(b)
-    b = cut_all(b, wheel_wells() + rec + light_recesses() + shut_lines() + feature_lines())
+    import os
+    if os.path.exists("out/body_cut.brep"):
+        b = cq.Shape.importBrep("out/body_cut.brep")
+    else:
+        b = cut_all(b, wheel_wells() + rec + light_recesses() + hood_lines() + shut_lines() + feature_lines())
+        b.exportBrep("out/body_cut.brep")
     print("lights", b.isValid(), time.time()-T, flush=True)
-    b = fuse_all(b, [grille()] + mirrors() + lamp_lenses() + [ornament(), roof_fin()])
+    b = fuse_all(b, [grille()] + mirrors() + lamp_lenses() + [roof_fin()])
     print("fused", b.isValid(), time.time()-T, flush=True)
     return b
 # ---- wheels ------------------------------------------------------------------------
