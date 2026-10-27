@@ -283,17 +283,79 @@ def shut_lines():
         t += [h, h.mirror("XZ")]
     return t
 
+# ---- concept details: feature lines, trims, lenses, ornament ----------------------
+def side_line(xs, zs_, h=6.0, depth=3.0):
+    """Shallow feature-line groove along the side skin, as short straight segments."""
+    t = []
+    for xa, xb, za, zb_ in zip(xs[:-1], xs[1:], zs_[:-1], zs_[1:]):
+        yin = min(skin_y(xa, za), skin_y(xb, zb_), skin_y(0.5 * (xa + xb), 0.5 * (za + zb_))) - depth
+        poly = [(xa, za - h / 2), (xb, zb_ - h / 2), (xb, zb_ + h / 2), (xa, za + h / 2)]
+        g = xz_prism(poly, yin, yin + 200)
+        t += [g, g.mirror("XZ")]
+    return t
+
+def feature_lines():
+    t = []
+    # chrome belt line under the side glass
+    xs = np.linspace(1420, 3900, 11)
+    t += side_line(xs, [section_geom(x)[7][1] - 4 for x in xs], h=9, depth=3)
+    # fender line: from the headlamp rising to the belt
+    xs = np.linspace(170, 1330, 6)
+    t += side_line(xs, list(np.interp(xs, [170, 1330], [880, 1040])), h=6, depth=3)
+    # shoulder / waft line from the rear door to the tail lamp
+    xs = np.linspace(3950, 5250, 6)
+    t += side_line(xs, list(np.interp(xs, [3950, 5250], [1020, 975])), h=6, depth=3)
+    # lower door character line (chrome sill strip)
+    xs = np.linspace(1180, 3660, 9)
+    t += side_line(xs, [330.0] * len(xs), h=10, depth=3)
+    # rear: lower chrome strip across the bumper
+    t.append(box(L - 4, L + 10, -700, 700, 440, 450))
+    return t
+
+def plan_band(y0, y1, z0, z1, d0, d1, front=True):
+    """Solid between depth d0 and d1 below the rounded front/rear skin (a lamp lens)."""
+    ys = np.linspace(y0, y1, 12)
+    if front:
+        outer = [(x_surface(y) + d0, y) for y in ys]
+        inner = [(x_surface(y) + d1, y) for y in reversed(ys)]
+    else:
+        outer = [(x_surface(y, False) - d0, y) for y in ys]
+        inner = [(x_surface(y, False) - d1, y) for y in reversed(ys)]
+    return cq.Workplane("XY", origin=(0, 0, z0)).polyline(outer + inner).close().extrude(z1 - z0).val()
+
+def lamp_lenses():
+    t = []
+    for sg in (1, -1):
+        m = (lambda s: s) if sg > 0 else (lambda s: s.mirror("XZ"))
+        t.append(m(plan_band(585, 880, 763, 837, 22, 50)))            # headlamp inner lens
+        t.append(m(plan_band(20, 790, 918, 977, 10, 26, False)))      # rear lamp bar lens
+        t.append(m(plan_band(675, 800, 575, 975, 10, 26, False)))     # rear lamp upright lens
+    return t
+
+def ornament():
+    """Stylised hood mascot on the grille shell."""
+    base = box(150, 230, -22, 22, 955, 990)
+    fig = xz_prism([(165, 985), (215, 985), (205, 1035), (185, 1100), (172, 1095), (180, 1040)], -9, 9)
+    wing = cq.Workplane("YZ", origin=(178, 0, 0)).polyline(
+        [(-8, 1030), (8, 1030), (38, 1085), (30, 1092), (0, 1060), (-30, 1092), (-38, 1085)]).close().extrude(22).val()
+    return base.fuse(fig, wing).clean()
+
+def roof_fin():
+    x0 = 3820.0
+    poly = [(x0, float(zt(x0)) - 25), (x0 + 190, float(zt(x0 + 190)) - 25), (x0 + 175, float(zt(x0 + 175)) + 12),
+            (x0 + 120, float(zt(x0)) + 30), (x0 + 30, float(zt(x0)) + 10)]
+    return xz_prism(poly, -22, 22)
+
 def body():
     import time; T=time.time()
     b = body_loft()
     print("loft", b.isValid(), time.time()-T, flush=True)
     rec = glass_recesses(b)
-    b = cut_all(b, wheel_wells() + rec + light_recesses() + shut_lines())
+    b = cut_all(b, wheel_wells() + rec + light_recesses() + shut_lines() + feature_lines())
     print("lights", b.isValid(), time.time()-T, flush=True)
-    b = fuse_all(b, [grille()] + mirrors())
+    b = fuse_all(b, [grille()] + mirrors() + lamp_lenses() + [ornament(), roof_fin()])
     print("fused", b.isValid(), time.time()-T, flush=True)
     return b
-
 # ---- wheels ------------------------------------------------------------------------
 def wheel(xc, sg, track, width):
     # plain tyre cylinder with rounded shoulders and a shallow rim recess on the outer face
