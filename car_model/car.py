@@ -285,14 +285,16 @@ def shut_lines():
 
 # ---- concept details: feature lines, trims, lenses, ornament ----------------------
 def side_line(xs, zs_, h=6.0, depth=3.0):
-    """Shallow feature-line groove along the side skin, as short straight segments."""
-    t = []
-    for xa, xb, za, zb_ in zip(xs[:-1], xs[1:], zs_[:-1], zs_[1:]):
-        yin = min(skin_y(xa, za), skin_y(xb, zb_), skin_y(0.5 * (xa + xb), 0.5 * (za + zb_))) - depth
-        poly = [(xa, za - h / 2), (xb, zb_ - h / 2), (xb, zb_ + h / 2), (xa, za + h / 2)]
-        g = xz_prism(poly, yin, yin + 200)
-        t += [g, g.mirror("XZ")]
-    return t
+    """Shallow feature-line groove: one lofted tool that follows the side skin."""
+    xs = np.linspace(xs[0], xs[-1], 3 * len(xs))
+    zz = np.interp(xs, np.linspace(xs[0], xs[-1], len(zs_)), zs_)
+    wires = []
+    for x, z in zip(xs, zz):
+        yin = skin_y(x, z) - depth
+        pts = [V(x, yin, z - h / 2), V(x, yin + 120, z - h / 2), V(x, yin + 120, z + h / 2), V(x, yin, z + h / 2)]
+        wires.append(cq.Wire.makePolygon(pts, close=True))
+    g = cq.Solid.makeLoft(wires, ruled=False)
+    return [g, g.mirror("XZ")]
 
 def feature_lines():
     t = []
