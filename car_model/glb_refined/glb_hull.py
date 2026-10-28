@@ -14,12 +14,11 @@ WHEELS = (903.0, 4155.0); R_WHEEL = 362.0; ZW = 366.0
 MIRROR_X = (1880.0, 2240.0)
 
 def strip_mesh(m):
+    """Drop the GLB mirror heads (only what sticks out beyond the door skin). The wheels stay in
+    while the hull is built so the arches have no slits; clean wells are cut afterwards."""
     c = m.triangles_center
-    mirror = (np.abs(c[:, 1]) > 820) & (c[:, 2] > 950) & (c[:, 2] < 1290) & (c[:, 0] > MIRROR_X[0] - 30) & (c[:, 0] < MIRROR_X[1] + 30)
-    wheel = np.zeros(len(c), bool)
-    for xc in WHEELS:
-        wheel |= (np.hypot(c[:, 0] - xc, c[:, 2] - ZW) < R_WHEEL + 25) & (np.abs(c[:, 1]) > 560)
-    return trimesh.Trimesh(m.vertices, m.faces[~wheel], process=False)
+    mirror = (np.abs(c[:, 1]) > 935) & (c[:, 2] > 990) & (c[:, 2] < 1290) & (c[:, 0] > MIRROR_X[0] - 30) & (c[:, 0] < MIRROR_X[1] + 30)
+    return trimesh.Trimesh(m.vertices, m.faces[~mirror], process=False)
 
 def permuted(m, order, flip=None):
     v = m.vertices[:, order].copy()
@@ -117,44 +116,142 @@ def slope_info(D):
 def slack_from(s):
     return np.minimum(3.0 * np.nan_to_num(s, nan=0.0), 8.0)
 
+FILL = np.hypot(*np.mgrid[-12:13, -12:13]) <= 12.5        # 100 mm disc: fills any dip narrower than that
+
+def fill_down(D, valid):
+    """Depth map (bigger = further from the viewer): remove narrow deep pits (grey opening)."""
+    Dn = np.where(valid, D, 1e5)
+    return np.where(valid, np.minimum(D, ndimage.grey_opening(Dn, footprint=FILL)), np.nan)
+
+def fill_up(D, valid):
+    """Height map (bigger = toward the viewer): fill narrow dips (grey closing)."""
+    Dn = np.where(valid, D, -1e4)
+    return np.where(valid, np.maximum(D, ndimage.grey_closing(Dn, footprint=FILL)), np.nan)
+
+# grille / hood blend (world coordinates; matches glb_features: SY, zf(), XG)
+XG = 4.0; X_HOOD = 420.0; SY = 0.976
+def zf(z): return 168.0 + (z - 120.0) * (920.0 - 168.0) / (965.0 - 120.0)
+def grille_top(y):
+    yc = np.clip(np.abs(y) / SY, 0, 545.0)
+    return zf(965.0 - 25.0 * (yc / 545.0) ** 2)
+def blend_weight(y):
+    t = np.clip((np.abs(y) - 520.0) / 120.0, 0, 1)
+    return 1 - t * t * (3 - 2 * t)
+
+WHEEL_HALF = 470.0                                        # bridge x in [xc - 470, xc + 470]
+def bridge_wheels(D, xs, rows, raise_only=True):
+    """Across each wheel zone, replace the map by a straight bridge between the values just ahead of
+    and behind the wheel (only raising it), so fenders, sides and floor run solid over the arches;
+    clean round wells are cut out afterwards."""
+    D = D.copy()
+    for xc in WHEELS:
+        ia, ib = np.searchsorted(xs, xc - WHEEL_HALF), np.searchsorted(xs, xc + WHEEL_HALF)
+        for r in np.nonzero(rows)[0]:
+            lo, hi = D[r, ia - 1], D[r, ib + 1]
+            if not (np.isfinite(lo) and np.isfinite(hi)):
+                continue
+            line = np.linspace(lo, hi, ib - ia + 1)
+            seg = D[r, ia:ib + 1]
+            D[r, ia:ib + 1] = np.fmax(np.nan_to_num(seg, nan=-1e4), line) if raise_only else line
+    return D
+
 def clean_maps(res):
     out = {}
     for k in ('F', 'G'):
         a, b, D = res[k]
+        D = fill_down(D, np.isfinite(D))                         # lower-front slot, deck-lid slot, panel ripple
         s = slope_info(D)
         g = np.nan_to_num(s, nan=0.0) > 2.5
-        out[k] = (a, b, np.where(g, -1e5, D - slack_from(s)))   # x >= F - slack  (grazing: none)
+        Dc = np.where(g, -1e5, D - slack_from(s))
+        if k == 'F':
+            Y, Z = np.meshgrid(a, b)
+            # above the grille top the hood / cowl / screen come from the top view only
+            Dc = np.where((np.abs(Y) < 800) & (Z > grille_top(Y)), -1e5, Dc)
+            # grille area: solid right up to the grille front plane (the vane pocket is cut later),
+            # receding gently past the grille corners, so there is no slot under the hood blend
+            ay = np.abs(Y)
+            core = (ay <= 532) & (Z >= zf(340.0)) & (Z <= grille_top(Y))
+            edge = (ay > 532) & (ay < 650) & (Z >= grille_top(Y) - 160) & (Z <= grille_top(Y))
+            Dc = np.where(core, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG), Dc)
+            Dc = np.where(edge, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG + 2.5 * (ay - 532)), Dc)
+        out[k] = (a, b, Dc)
         out[k + '_miss'] = ~np.isfinite(D)
-    out['H_raw'] = res['H'][2]; out['S_raw'] = res['S'][2]
+    out['H_raw'] = res['H'][2].copy(); out['S_raw'] = res['S'][2].copy()
     for k in ('H', 'B', 'S'):
         a, b, D = res[k]
         D = D.copy()
-        # mirrors: cap the map across the mirror's X range at the body just ahead and behind it
-        xa, xb = MIRROR_X[0] - 40, MIRROR_X[1] + 40
-        ia, ib = np.searchsorted(a, xa), np.searchsorted(a, xb)
-        rows = (b > 940) & (b < 1300) if k == 'S' else (np.abs(b) > 780) if k == 'H' else np.zeros(len(b), bool)
-        for r in np.nonzero(rows)[0]:
-            lo, hi = D[r, ia - 1], D[r, ib + 1]
-            if np.isfinite(lo) and np.isfinite(hi):
-                cap = np.linspace(lo, hi, ib - ia + 1)
-            elif np.isfinite(lo) or np.isfinite(hi):
-                cap = np.full(ib - ia + 1, lo if np.isfinite(lo) else hi)
-            else:
-                continue
-            seg = D[r, ia:ib + 1]
-            D[r, ia:ib + 1] = np.where(np.isfinite(seg), np.minimum(seg, cap + 5), seg)
         valid = np.isfinite(D)
         if k in ('H', 'S'):
-            # drop thin spikes (mascot, antenna, handles): grey opening of the height map
+            # drop thin spikes (mascot, antenna, handles), then fill narrow pits
             Dn = np.where(valid, D, -1e4)
             Do = ndimage.grey_opening(Dn, size=(15, 15))
             D = np.where(valid & (Do > -1e3), np.minimum(D, Do), np.nan)
+            D = fill_up(D, np.isfinite(D))
             valid = np.isfinite(D)
+        if k == 'H':
+            # cowl trench at the screen base: bridge straight from the hood to the screen
+            ia, ib = np.searchsorted(a, 1440.0), np.searchsorted(a, 1700.0)
+            rows = np.nonzero(np.abs(b) < 780)[0]
+            for r in rows:
+                lo, hi = D[r, ia], D[r, ib]
+                if np.isfinite(lo) and np.isfinite(hi):
+                    D[r, ia:ib + 1] = np.fmax(D[r, ia:ib + 1], np.linspace(lo, hi, ib - ia + 1))
+            valid = np.isfinite(D)
+        if k == 'H':
+            D = bridge_wheels(D, a, np.abs(b) > 540)                  # fender tops over the arches
+        elif k == 'S':
+            D = bridge_wheels(D, a, (b > 120) & (b < 960))            # body sides over the arches
+        elif k == 'B':
+            # floor under the wheel zones: lift the bottom limit to the floor line ahead of / behind the wheel
+            D = bridge_wheels(D, a, np.abs(b) > 540)
+        valid = np.isfinite(D)
+        if k in ('H', 'S'):
+            raw = out[k + '_raw']
+            out[k + '_raw'] = np.where(np.isfinite(D), np.fmax(np.nan_to_num(raw, nan=-1e4), D), raw)
         Ds = nsmooth(np.nan_to_num(D, nan=0.0), valid, {'H': 6, 'B': 4, 'S': 4}[k])
         s = slope_info(Ds)
         sgn = -1.0 if k == 'B' else 1.0                       # H, S are upper bounds; B is a lower bound
         out[k] = (a, b, Ds + sgn * slack_from(s))
         out[k + '_graze'] = np.nan_to_num(s, nan=0.0) > 2.5
+        if k == 'H':
+            out['H_smooth'] = Ds
+    # ---- grille top -> hood: Hermite blend from the grille top edge to the hood at X_HOOD ----
+    xs, ys2, H = out['H']; Hs = out['H_smooth']
+    j0, j1 = np.searchsorted(xs, XG), np.searchsorted(xs, X_HOOD)
+    xx = xs[j0:j1 + 1]
+    Hb = H.copy(); Hr = out['H_raw']
+    t = (xx - xx[0]) / (xx[-1] - xx[0])
+    h00, h10, h01, h11 = 2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t, -2*t**3 + 3*t**2, t**3 - t**2
+    span = xx[-1] - xx[0]
+    for r, y in enumerate(ys2):
+        w = blend_weight(y)
+        if w <= 0 or not np.isfinite(Hs[r, j1]):
+            continue
+        z0, z1 = grille_top(y), Hs[r, j1]
+        s1 = (Hs[r, j1 + 3] - Hs[r, j1 - 3]) / (xs[j1 + 3] - xs[j1 - 3])
+        curve = h00 * z0 + h10 * span * 0.25 + h01 * z1 + h11 * span * s1
+        cur = np.where(np.isfinite(Hb[r, j0:j1 + 1]), Hb[r, j0:j1 + 1], curve)
+        Hb[r, j0:j1 + 1] = (1 - w) * cur + w * curve
+        out['H_graze'][r, j0:j1 + 1] &= w < 0.5
+        Hr[r, j0:j1 + 1] = np.fmax(np.nan_to_num(Hr[r, j0:j1 + 1], nan=-1e4), Hb[r, j0:j1 + 1])
+    out['H'] = (xs, ys2, Hb); out['H_raw'] = Hr
+    # side view must allow the new nose: S(x, z) >= widest |y| whose blended top reaches z
+    xs3, zs3, S = out['S']
+    S = S.copy(); Sr = out['S_raw'].copy()
+    for jj, x in enumerate(xx):
+        jx = np.searchsorted(xs3, x)
+        tops = Hb[:, j0 + jj]
+        need = np.full(len(zs3), np.nan)
+        for r, y in enumerate(ys2):
+            if blend_weight(y) <= 0 or not np.isfinite(tops[r]):
+                continue
+            m = zs3 <= tops[r]
+            need[m] = np.fmax(need[m], abs(y))
+        has = np.isfinite(need) & (zs3 > 700)
+        S[has, jx] = np.fmax(np.nan_to_num(S[has, jx], nan=-1e4), need[has])
+        out['S_graze'][has, jx] = False
+        Sr[has, jx] = np.fmax(np.nan_to_num(Sr[has, jx], nan=-1e4), need[has])
+    out['S'] = (xs3, zs3, S); out['S_raw'] = Sr
     return out
 
 def field(cm):
@@ -188,11 +285,18 @@ if __name__ == "__main__":
     import time
     T = time.time()
     mesh = trimesh.load("out/sample_mm.stl")
-    res = maps(mesh); print("maps", round(time.time() - T), flush=True)
+    import os, pickle
+    if os.path.exists("out/hull_res.pkl"):
+        res = pickle.load(open("out/hull_res.pkl", "rb"))
+    else:
+        res = maps(mesh); pickle.dump(res, open("out/hull_res.pkl", "wb"))
+    print("maps", round(time.time() - T), flush=True)
     np.savez("out/hull_maps.npz", **{k + '_' + n: v for k, t in res.items() for n, v in zip('abD', t)})
     cm = clean_maps(res)
     xg, yg, zg, phi = field(cm); print("field", phi.shape, round(time.time() - T), flush=True)
-    vtx, faces, _, _ = measure.marching_cubes(np.pad(phi, 1, constant_values=-40), 0.0)
+    # iso level slightly off zero: flat fills and blends land exactly on grid values, and an exact
+    # zero at a grid point is what makes marching cubes emit non-manifold edges
+    vtx, faces, _, _ = measure.marching_cubes(np.pad(phi, 1, constant_values=-40), 0.37)
     vtx = (vtx - 1) * P + np.array([xg[0], yg[0], zg[0]])
     m = trimesh.Trimesh(vtx, faces[:, ::-1], process=True)
     parts = m.split(only_watertight=False) if len(m.faces) < 0 else None

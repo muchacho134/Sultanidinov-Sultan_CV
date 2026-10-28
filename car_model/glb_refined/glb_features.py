@@ -78,10 +78,7 @@ def grille():
     yi = np.linspace(-495, 495, 23)
     inner = F([(495, 365)] + [(y, zc(y, 908)) for y in yi[::-1]] + [(-495, 365)])
     top = zf(965)
-    shell = yz_prism(outer, XG, 620)
-    # the shell's top runs back and up into the hood instead of leaving a flat ledge
-    wedge = xz_prism([(XG - 5, 0), (XG - 5, top), (XG + 60, top + 22), (300, top + 55), (640, top + 95), (640, 0)], -700, 700)
-    shell = shell.intersect(wedge)
+    shell = yz_prism(outer, XG, XG + 70)                                   # frame only; the hood blends into its top
     shell = shell.cut(yz_prism(inner, XG - 1, XG + 40))
     bars = []
     for k in range(-8, 9):
@@ -145,7 +142,7 @@ def wheel(xc, sg):
     return w.translate(V(xc, sg * TRACK / 2, ZW))
 
 def arch_cuts():
-    return [cq.Solid.makeCylinder(R_ARCH, 700, V(xc, sg * 600, ZW), V(0, sg, 0)) for xc in WHEELS for sg in (1, -1)]
+    return [cq.Solid.makeCylinder(R_ARCH, 700, V(xc, sg * 590, ZW), V(0, sg, 0)) for xc in WHEELS for sg in (1, -1)]
 
 def mirrors():
     out = []
@@ -174,7 +171,7 @@ if __name__ == "__main__":
     import time
     T = time.time()
     body = to_manifold(trimesh.load("out/glb_hull_dec.stl"))
-    cuts = tess(front_cuts() + rear_cuts())          # arches come from the GLB itself
+    cuts = tess(arch_cuts() + front_cuts() + rear_cuts())
     adds = tess(front_adds() + rear_adds() + mirrors())
     print("tools", len(cuts), len(adds), round(time.time() - T, 1), flush=True)
     for i, m in enumerate(cuts + adds):
