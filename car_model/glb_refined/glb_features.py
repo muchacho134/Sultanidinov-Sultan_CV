@@ -42,7 +42,7 @@ def rrect(y0, y1, z0, z1, r, n=5):
 def F(poly):  return [(y * SY, zf(z)) for y, z in poly]     # map a concept front-view outline
 def Rr(poly): return [(y * SY, zr(z)) for y, z in poly]     # map a concept rear-view outline
 
-def skin_region(y0, y1, z0, z1, d0, d1, front=True, nz=6, ny=24):
+def skin_region(y0, y1, z0, z1, d0, d1, front=True, nz=14, ny=72):
     sg = 1 if front else -1
     wires = []
     for z in np.linspace(z0, z1, nz):
@@ -65,7 +65,8 @@ def mir(shapes):
     return shapes + [t.mirror("XZ") for t in shapes]
 
 def hexagon_exhaust(inset=0.0):
-    pts = [(470, 335), (800, 335), (788, 250), (522, 240), (470, 300)]
+    # moved slightly inboard so the exhausts sit on the flat part of the rear face, not the rounded corner
+    pts = [(y * 0.88, z) for y, z in [(470, 335), (800, 335), (788, 250), (522, 240), (470, 300)]]
     cy = sum(p[0] for p in pts) / 5; cz = sum(p[1] for p in pts) / 5
     return [(cy + (y - cy) * (1 - inset), cz + (z - cz) * (1 - inset)) for y, z in pts]
 
@@ -113,8 +114,6 @@ def front_adds():
 # ---- rear --------------------------------------------------------------------------
 def rear_cuts():
     t = []
-    ubar = [(842, 545), (842, 990), (-842, 990), (-842, 545), (-671, 545), (-671, 910), (671, 910), (671, 545)]
-    t.append(pocket(Rr(ubar), 30, False))                                   # tail lamp housing
     t.append(pocket(Rr(rrect(-660, 660, 640, 905, 12)), 7, False))          # recessed centre panel
     t.append(pocket(Rr(rrect(-905, 905, 499, 505, 2)), 4, False))           # bumper crease
     t.append(pocket(Rr(rrect(-790, 790, 190, 350, 30)), 22, False))         # diffuser band
@@ -124,8 +123,11 @@ def rear_cuts():
 
 def rear_adds():
     t = []
+    # tail lamp: a raised U band 8 mm proud of the body, its inner light strip a further 4 mm proud
+    ubar = [(842, 545), (842, 990), (-842, 990), (-842, 545), (-671, 545), (-671, 910), (671, 910), (671, 545)]
+    t.append(layer(Rr(ubar), -8, 14, False))
     guide = [(800, 572), (800, 962), (-800, 962), (-800, 572), (-772, 572), (-772, 940), (772, 940), (772, 572)]
-    t.append(layer(Rr(guide), 12, 34, False))                               # light guide inside the lamp
+    t.append(layer(Rr(guide), -12, 0, False))
     ring = layer(Rr(hexagon_exhaust(-0.06)), 14, 30, False).cut(pocket(Rr(hexagon_exhaust(0.08)), 70, False))
     t += mir([ring])                                                        # exhaust surrounds
     return t
@@ -170,7 +172,7 @@ def union_all(ms):
 if __name__ == "__main__":
     import time
     T = time.time()
-    body = to_manifold(trimesh.load("out/glb_hull_dec.stl"))
+    body = to_manifold(trimesh.load("out/glb_hull_filled.stl"))
     cuts = tess(arch_cuts() + front_cuts() + rear_cuts())
     adds = tess(front_adds() + rear_adds() + mirrors())
     print("tools", len(cuts), len(adds), round(time.time() - T, 1), flush=True)

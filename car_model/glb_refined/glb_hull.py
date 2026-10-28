@@ -118,25 +118,70 @@ def slack_from(s):
 
 FILL = np.hypot(*np.mgrid[-12:13, -12:13]) <= 12.5        # 100 mm disc: fills any dip narrower than that
 
+def extend_nearest(D, valid):
+    idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)
+    return D[tuple(idx)]
+
 def fill_down(D, valid):
-    """Depth map (bigger = further from the viewer): remove narrow deep pits (grey opening)."""
-    Dn = np.where(valid, D, 1e5)
+    """Depth map (bigger = further from the viewer): remove narrow deep pits (grey opening),
+    including notches that touch the outline."""
+    if not valid.any():
+        return D
+    Dn = extend_nearest(np.where(valid, D, 0.0), valid)
     return np.where(valid, np.minimum(D, ndimage.grey_opening(Dn, footprint=FILL)), np.nan)
 
 def fill_up(D, valid):
     """Height map (bigger = toward the viewer): fill narrow dips (grey closing)."""
-    Dn = np.where(valid, D, -1e4)
+    if not valid.any():
+        return D
+    Dn = extend_nearest(np.where(valid, D, 0.0), valid)
     return np.where(valid, np.maximum(D, ndimage.grey_closing(Dn, footprint=FILL)), np.nan)
 
+def extend_down(D, zs, z_floor, z_from, outward=None):
+    """For each column of a (z rows, other cols) map: below its lowest surface value under z_from,
+    repeat that value down to the floor, so the faces run straight down to a flat underside.
+    outward='min' (depth maps) / 'max' (width maps): instead use the most outward value below z_from,
+    so the lower face is a straight plane with nothing tucked under it."""
+    D = D.copy()
+    rows = np.nonzero((zs >= z_floor - 4) & (zs <= z_from))[0]
+    if outward == 'min':
+        # bumper line at z_from, fitted as an even polynomial in y so plates / tips / brackets drop out
+        r = rows[-1]
+        yv = np.arange(D.shape[1]) * P - 1000.0
+        ok = np.isfinite(D[r]) & (np.abs(yv) < 760)
+        coef = np.polyfit(yv[ok] ** 2, D[r, ok], 3) if ok.sum() > 20 else None
+        line = np.where(np.abs(yv) < 760, np.polyval(coef, yv ** 2), D[r]) if coef is not None else D[r]
+        line = np.where(np.isfinite(D[r]), np.maximum(line, np.nanmin(D[r, ok]) if ok.any() else line), np.nan)
+    for c in range(D.shape[1]):
+        col = D[rows, c]
+        ok = np.nonzero(np.isfinite(col))[0]
+        if len(ok) == 0:
+            continue
+        first = ok[0]
+        if outward == 'min':
+            # the lower face (floor up to z_from) continues the (smoothed) bumper line straight down
+            D[rows, c] = line[c] if np.isfinite(line[c]) else col[np.nonzero(np.isfinite(col))[0][-1]]
+        else:
+            D[rows[:first], c] = col[first]
+    return D
+
 # grille / hood blend (world coordinates; matches glb_features: SY, zf(), XG)
-XG = 4.0; X_HOOD = 420.0; SY = 0.976
+XG = 4.0; X_HOOD = 540.0; SY = 0.976
 def zf(z): return 168.0 + (z - 120.0) * (920.0 - 168.0) / (965.0 - 120.0)
 def grille_top(y):
     yc = np.clip(np.abs(y) / SY, 0, 545.0)
     return zf(965.0 - 25.0 * (yc / 545.0) ** 2)
 def blend_weight(y):
-    t = np.clip((np.abs(y) - 520.0) / 120.0, 0, 1)
-    return 1 - t * t * (3 - 2 * t)
+    t = np.clip((np.abs(y) - 470.0) / 230.0, 0, 1)
+    return 0.5 * (1 + np.cos(np.pi * t))
+
+SIL = np.hypot(*np.mgrid[-10:11, -10:11]) <= 10            # 80 mm disc
+def silhouette(D):
+    """Inside of a view's silhouette, with pin holes and narrow notches closed."""
+    v = np.isfinite(D)
+    return ndimage.binary_fill_holes(ndimage.binary_closing(v, structure=SIL, iterations=1) | v)
+
+Z_FLOOR = 190.0                                            # flat underside
 
 WHEEL_HALF = 470.0                                        # bridge x in [xc - 470, xc + 470]
 def bridge_wheels(D, xs, rows, raise_only=True):
@@ -159,6 +204,9 @@ def clean_maps(res):
     out = {}
     for k in ('F', 'G'):
         a, b, D = res[k]
+        Y, Z = np.meshgrid(a, b)
+        D = np.where((Z < 420) & (np.abs(Y) > 560) & (D > 420), np.nan, D)   # tyres seen under the bumper
+        D = extend_down(D, b, Z_FLOOR, 420.0, outward='min')
         D = fill_down(D, np.isfinite(D))                         # lower-front slot, deck-lid slot, panel ripple
         s = slope_info(D)
         g = np.nan_to_num(s, nan=0.0) > 2.5
@@ -170,12 +218,12 @@ def clean_maps(res):
             # grille area: solid right up to the grille front plane (the vane pocket is cut later),
             # receding gently past the grille corners, so there is no slot under the hood blend
             ay = np.abs(Y)
-            core = (ay <= 532) & (Z >= zf(340.0)) & (Z <= grille_top(Y))
+            core = (ay <= 532) & (Z >= Z_FLOOR - 4) & (Z <= grille_top(Y))     # flush to the floor under the grille
             edge = (ay > 532) & (ay < 650) & (Z >= grille_top(Y) - 160) & (Z <= grille_top(Y))
             Dc = np.where(core, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG), Dc)
             Dc = np.where(edge, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG + 2.5 * (ay - 532)), Dc)
-        out[k] = (a, b, Dc)
-        out[k + '_miss'] = ~np.isfinite(D)
+        out[k] = (a, b, np.where(np.isfinite(D), Dc, -1e5))      # gap inside the outline: no constraint
+        out[k + '_miss'] = ~silhouette(D)
     out['H_raw'] = res['H'][2].copy(); out['S_raw'] = res['S'][2].copy()
     for k in ('H', 'B', 'S'):
         a, b, D = res[k]
@@ -201,6 +249,14 @@ def clean_maps(res):
             D = bridge_wheels(D, a, np.abs(b) > 540)                  # fender tops over the arches
         elif k == 'S':
             D = bridge_wheels(D, a, (b > 120) & (b < 960))            # body sides over the arches
+            # below 260 mm the sides drop vertically from their widest point between 260 and 600 mm,
+            # so the floor is a straight plane out to the full body width (no tuck-under, no overhang)
+            band = (b >= 260.0) & (b <= 600.0)
+            ref = np.nanmax(np.where(np.isfinite(D[band]), D[band], -np.inf), axis=0)
+            ref = np.where(np.isfinite(ref), ref, np.nan)
+            low = (b >= Z_FLOOR - 4) & (b < 260.0)
+            D[low] = np.where(np.isfinite(ref)[None, :], ref[None, :], D[low])
+            D = extend_down(D, b, Z_FLOOR, 600.0)
         elif k == 'B':
             # floor under the wheel zones: lift the bottom limit to the floor line ahead of / behind the wheel
             D = bridge_wheels(D, a, np.abs(b) > 540)
@@ -213,6 +269,10 @@ def clean_maps(res):
         sgn = -1.0 if k == 'B' else 1.0                       # H, S are upper bounds; B is a lower bound
         out[k] = (a, b, Ds + sgn * slack_from(s))
         out[k + '_graze'] = np.nan_to_num(s, nan=0.0) > 2.5
+        if k in ('H', 'S'):
+            # the hard limit only trims real protrusions: never below the smoothed shape itself
+            raw = out[k + '_raw']
+            out[k + '_raw'] = np.where(np.isfinite(Ds), np.fmax(np.nan_to_num(raw, nan=-1e4), Ds + slack_from(s)), raw)
         if k == 'H':
             out['H_smooth'] = Ds
     # ---- grille top -> hood: Hermite blend from the grille top edge to the hood at X_HOOD ----
@@ -229,11 +289,23 @@ def clean_maps(res):
             continue
         z0, z1 = grille_top(y), Hs[r, j1]
         s1 = (Hs[r, j1 + 3] - Hs[r, j1 - 3]) / (xs[j1 + 3] - xs[j1 - 3])
-        curve = h00 * z0 + h10 * span * 0.25 + h01 * z1 + h11 * span * s1
-        cur = np.where(np.isfinite(Hb[r, j0:j1 + 1]), Hb[r, j0:j1 + 1], curve)
-        Hb[r, j0:j1 + 1] = (1 - w) * cur + w * curve
+        curve = h00 * z0 + h10 * span * 0.85 + h01 * z1 + h11 * span * s1
+        cur = Hb[r, j0:j1 + 1]
+        have = np.isfinite(cur)
+        # blend with surface that exists; create new surface only inside the grille width
+        Hb[r, j0:j1 + 1] = np.where(have, (1 - w) * cur + w * curve, curve if abs(y) <= 540 else np.nan)
         out['H_graze'][r, j0:j1 + 1] &= w < 0.5
         Hr[r, j0:j1 + 1] = np.fmax(np.nan_to_num(Hr[r, j0:j1 + 1], nan=-1e4), Hb[r, j0:j1 + 1])
+    # smooth the blended nose across y as well, so the grille corners fade into the fenders
+    rows = np.nonzero(blend_weight(ys2) > 0)[0]
+    r0, r1 = max(rows.min() - 20, 0), min(rows.max() + 20, len(ys2) - 1)
+    c0, c1 = max(j0 - 2, 0), j1 + 20
+    patch = Hb[r0:r1 + 1, c0:c1 + 1]
+    ok = np.isfinite(patch)
+    sm = nsmooth(np.nan_to_num(patch, nan=0.0), ok, 6)
+    keep_front = np.arange(c0, c1 + 1)[None, :] <= j0 + 1                # leave the grille top edge crisp
+    Hb[r0:r1 + 1, c0:c1 + 1] = np.where(ok & ~keep_front, sm, patch)
+    Hr[r0:r1 + 1, c0:c1 + 1] = np.fmax(Hr[r0:r1 + 1, c0:c1 + 1], Hb[r0:r1 + 1, c0:c1 + 1])
     out['H'] = (xs, ys2, Hb); out['H_raw'] = Hr
     # side view must allow the new nose: S(x, z) >= widest |y| whose blended top reaches z
     xs3, zs3, S = out['S']
@@ -260,12 +332,14 @@ def field(cm):
     # body is inside every view's silhouette (misses -> outside); grazing cells add no constraint
     Fv = np.where(cm['F_miss'], 1e5, F)              # x must be >= F
     Gv = np.where(cm['G_miss'], 1e5, G)              # x must be <= L - G
-    Hv = np.where(np.isfinite(H), np.where(cm['H_graze'], 1e5, H), -1e5)
-    Bv = np.where(np.isfinite(B), np.where(cm['B_graze'], -1e5, B), 1e5)
-    Sv = np.where(np.isfinite(S), np.where(cm['S_graze'], 1e5, S), -1e5)
+    # outside a view's silhouette: excluded; a pin hole inside it: no constraint from that view
+    Hin, Sin = silhouette(H), silhouette(S)
+    Hv = np.where(np.isfinite(H), np.where(cm['H_graze'], 1e5, H), np.where(Hin, 1e5, -1e5))
+    Sv = np.where(np.isfinite(S), np.where(cm['S_graze'], 1e5, S), np.where(Sin, 1e5, -1e5))
     # keep silhouettes: a grazing cell next to a miss still bounds the body
     Hraw = np.where(np.isfinite(cm['H_raw']), cm['H_raw'] + 10.0, 1e5)
     Sraw = np.where(np.isfinite(cm['S_raw']), cm['S_raw'] + 10.0, 1e5)
+    Hraw = np.where(Hin & ~np.isfinite(cm['H_raw']), 1e5, Hraw)
     xg = np.arange(0, L + P, P); yg = ys; zg = zs
     phi = np.empty((len(xg), len(yg), len(zg)), np.float32)
     Fz, Gz = Fv.T, Gv.T                              # (y, z)
@@ -273,7 +347,7 @@ def field(cm):
         j = min(int(round(x / P)), H.shape[1] - 1)
         t_face = np.minimum(x - Fz, (L - Gz) - x)
         t_top = Hv[:, j][:, None] - zg[None, :]
-        t_bot = zg[None, :] - Bv[:, j][:, None]
+        t_bot = np.broadcast_to(zg[None, :] - Z_FLOOR, (len(yg), len(zg)))      # flat floor
         t_side = Sv[:, j][None, :] - np.abs(yg)[:, None]
         # hard limits: never above the GLB's own top surface or outside its sides (+10 mm)
         t_top2 = Hraw[:, j][:, None] - zg[None, :]
