@@ -15,7 +15,7 @@ _FI = {k: RegularGridInterpolator((st['zs' + k], st['ys' + k]), np.nan_to_num(st
 # concept front/rear-view coordinates -> this body
 SY = 0.976
 def zf(z):  return 168.0 + (z - 120.0) * (920.0 - 168.0) / (965.0 - 120.0)    # front: ground line .. grille top
-def zr(z):  return 216.0 + (z - 150.0) * (1094.0 - 216.0) / (1115.0 - 150.0)  # rear: ground line .. deck edge
+def zr(z):  return 216.0 + (z - 150.0) * (1010.0 - 216.0) / (1115.0 - 150.0)  # rear: ground line .. top of the rear face
 
 def x_surface(y, z, front=True):
     d = float(_FI['f' if front else 'r']([[z, abs(y)]])[0])
@@ -40,7 +40,12 @@ def rrect(y0, y1, z0, z1, r, n=5):
     return pts
 
 def F(poly):  return [(y * SY, zf(z)) for y, z in poly]     # map a concept front-view outline
-def Rr(poly): return [(y * SY, zr(z)) for y, z in poly]     # map a concept rear-view outline
+# rear: the concept's outer lamp edge (|y| = 842) lands just inside the flat part of the rear face
+_TAIL = np.load("out/tail.npz")
+_TZ = _TAIL['z'][np.isfinite(_TAIL['y0'])]; _TY = _TAIL['y0'][np.isfinite(_TAIL['y0'])]
+def sy_rear(z):
+    return min(SY, (float(np.interp(z, _TZ, _TY)) - 14.0) / 842.0)
+def Rr(poly): return [(y * sy_rear(zr(z)), zr(z)) for y, z in poly]     # map a concept rear-view outline
 
 def skin_region(y0, y1, z0, z1, d0, d1, front=True, nz=14, ny=72):
     sg = 1 if front else -1
@@ -118,7 +123,6 @@ def rear_cuts():
     t.append(pocket(Rr(rrect(-905, 905, 499, 505, 2)), 4, False))           # bumper crease
     t.append(pocket(Rr(rrect(-790, 790, 190, 350, 30)), 22, False))         # diffuser band
     t += mir([pocket(Rr(hexagon_exhaust()), 60, False)])                    # exhausts
-    t += mir([pocket(Rr([(677, 990), (683, 990), (683, 1070), (677, 1070)]), 4, False)])  # boot lid line
     return t
 
 def rear_adds():
@@ -146,10 +150,21 @@ def wheel(xc, sg):
 def arch_cuts():
     return [cq.Solid.makeCylinder(R_ARCH, 700, V(xc, sg * 590, ZW), V(0, sg, 0)) for xc in WHEELS for sg in (1, -1)]
 
+def ellipse_wire(xc, y, zc, a, b, n=40):
+    return cq.Wire.makePolygon([V(xc + a * math.cos(t), y, zc + b * math.sin(t))
+                                for t in np.linspace(0, 2 * math.pi, n, endpoint=False)], close=True)
+
 def mirrors():
+    """Simple rounded mirror: an elliptical head that narrows outward, on a slim stem."""
     out = []
     for sg in (1, -1):
-        m = box(1940, 2160, 860, 1025, 1040, 1160).fuse(box(1965, 2085, 700, 880, 1060, 1110))
+        head = cq.Solid.makeLoft([ellipse_wire(2050, 860, 1100, 115, 62),
+                                  ellipse_wire(2055, 960, 1102, 112, 60),
+                                  ellipse_wire(2075, 1015, 1106, 92, 48),
+                                  ellipse_wire(2095, 1030, 1110, 55, 28)], ruled=False)
+        stem = cq.Solid.makeLoft([ellipse_wire(2010, 640, 1080, 57, 23),
+                                  ellipse_wire(2032, 900, 1092, 45, 19)], ruled=False)
+        m = head.fuse(stem).clean()
         out.append(m if sg > 0 else m.mirror("XZ"))
     return out
 
@@ -182,6 +197,9 @@ if __name__ == "__main__":
     B = body - union_all(cuts)
     B = B + union_all(adds)
     b = from_manifold(B)
+    parts = b.split(only_watertight=False)
+    if len(parts) > 1:                                    # drop boolean slivers
+        b = max(parts, key=lambda p: len(p.faces))
     print("body", len(b.faces), "watertight", b.is_watertight, "volume", round(b.volume / 1e9, 3), round(time.time() - T, 1), flush=True)
     b.export("out/glb_refined_body.stl")
     ws = tess([wheel(xc, sg) for xc in WHEELS for sg in (1, -1)])

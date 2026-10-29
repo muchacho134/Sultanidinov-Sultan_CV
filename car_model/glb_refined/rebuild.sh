@@ -8,7 +8,7 @@ from depthmap import depth_map
 m=trimesh.load('out/glb_hull.stl'); m.merge_vertices()
 cc=trimesh.graph.connected_components(m.face_adjacency, min_len=1); big=max(cc,key=len)
 b=m.submesh([np.array(big)], append=True); b.merge_vertices()
-trimesh.smoothing.filter_taubin(b, lamb=0.5, nu=-0.53, iterations=15)    # smooth the even mesh, then reduce
+trimesh.smoothing.filter_taubin(b, lamb=0.5, nu=-0.53, iterations=40)    # smooth the even mesh, then reduce
 d=b.simplify_quadric_decimation(face_count=1500000); d.merge_vertices()
 cc=trimesh.graph.connected_components(d.face_adjacency, min_len=1); big=max(cc,key=len)
 d=d.submesh([np.array(big)], append=True); d.merge_vertices(); trimesh.repair.fix_normals(d)

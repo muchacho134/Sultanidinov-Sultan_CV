@@ -102,6 +102,111 @@ def maps(mesh):
     res['S'] = (xs3, zs3, np.where(np.isfinite(left) & np.isfinite(right), 0.5 * (left + right), np.fmax(left, right)))
     return res
 
+# ---- squarer, fuller tail (the GLB's tail is boat-shaped in plan; the concept's rear face is flat) ----
+X_T0 = 4700.0; R_TAIL = 120.0; TAPER = 60.0; CROWN = 20.0
+Z_T1, Z_T2 = 1000.0, 1120.0                                # reshaped below Z_T1, blended back by Z_T2
+
+def tail_profile(zs, G, ys):
+    """Rear-face set-back at the centre line vs z: median over |y| < 300, heavily smoothed."""
+    c = np.abs(ys) < 300
+    prof = np.array([np.nanmedian(G[r, c]) if np.isfinite(G[r, c]).any() else np.nan for r in range(len(zs))])
+    ok = np.isfinite(prof)
+    prof = np.interp(zs, zs[ok], prof[ok])
+    prof[zs < 420] = prof[np.searchsorted(zs, 420.0)]          # below the bumper line the face runs straight down
+    return ndimage.gaussian_filter1d(prof, 25)
+
+def square_tail(res):
+    ys, zs, G = res['G']; xs3, zs3, S = res['S']; xs, ys2, H = res['H']
+    G = G.copy(); S = S.copy(); H = H.copy()
+    G0 = tail_profile(zs, G, ys)
+    jt = np.searchsorted(xs3, X_T0)
+    Y0 = np.full(len(zs3), np.nan)
+    wmax = np.zeros(len(xs3))
+    for r, z in enumerate(zs3):
+        if z < Z_FLOOR - 4 or z > Z_T2:
+            continue
+        zr_ = max(z, 260.0)                                  # sides below 260 mm come from 260..600 later
+        rr = np.searchsorted(zs3, zr_)
+        s4 = S[rr, jt]
+        if not np.isfinite(s4):
+            continue
+        s0 = np.clip((S[rr, jt + 5] - S[rr, jt - 5]) / (xs3[jt + 5] - xs3[jt - 5]), -0.15, 0.0)
+        wt = s4 - TAPER; y0 = wt - R_TAIL
+        rg = np.searchsorted(zs, z)
+        g0 = G0[np.searchsorted(zs, max(z, 420.0))]            # the lower face continues the 420 mm line
+        gc = g0 + CROWN
+        xc = L - gc - R_TAIL                                  # corner circle centre (plan view)
+        new = np.full(len(xs3), np.nan)
+        x = xs3
+        a = (x >= X_T0) & (x <= xc)
+        t = (x[a] - X_T0) / (xc - X_T0)
+        h00, h10, h01 = 2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t, -2*t**3 + 3*t**2
+        new[a] = h00 * s4 + h10 * (xc - X_T0) * s0 + h01 * wt
+        b = (x > xc) & (x <= xc + R_TAIL)
+        new[b] = y0 + np.sqrt(np.maximum(R_TAIL**2 - (x[b] - xc)**2, 0.0))
+        new[x > xc + R_TAIL] = y0                             # between the corners the rear view sets the face
+        w = np.clip((z - Z_T1) / (Z_T2 - Z_T1), 0, 1)
+        old = S[r, jt:]; nw = new[jt:]
+        S[r, jt:] = np.where(np.isfinite(old) & np.isfinite(nw), (1 - w) * nw + w * old,
+                             np.where(w < 0.5, nw, old))
+        if z <= Z_T1:
+            Y0[r] = y0
+            wmax = np.fmax(wmax, np.nan_to_num(new, nan=0.0))
+        # rear face: smooth set-back profile + slight plan crown + the corner circle
+        ay = np.abs(ys)
+        gn = g0 + CROWN * np.minimum(ay / y0, 1.0) ** 2
+        gn = np.where(ay <= y0, gn, np.nan)                   # the corners come from the side view only
+        go = G[rg]
+        bl = np.where(np.isfinite(go) & np.isfinite(gn), (1 - w) * gn + w * go, np.where(w < 0.5, gn, go))
+        G[rg] = np.where(ay <= y0, bl, np.nan)                # corners: side view only, all the way up
+    # top view: cover the new, wider plan; the shoulder height continues outward from 120 mm inboard
+    for j, x in enumerate(xs):
+        if x < X_T0:
+            continue
+        jx = min(np.searchsorted(xs3, x), len(xs3) - 1)
+        wn = wmax[jx]
+        col = H[:, j]
+        fin = np.nonzero(np.isfinite(col) & (ys2 >= 0))[0]
+        if len(fin) == 0 or wn <= 0:
+            continue
+        ye = ys2[fin[-1]]
+        if wn <= ye + 10.0:
+            continue
+        ref = col[np.searchsorted(ys2, max(ye - 120.0, 0.0))]
+        for sg in (1, -1):
+            sel = (sg * ys2 > ye - 120.0) & (sg * ys2 <= wn)
+            H[sel, j] = np.fmax(np.nan_to_num(H[sel, j], nan=-1e4), ref)
+    # top view of the new tail, derived from the new rear face (G) and sides (S), so all three views
+    # describe one shape: H(x, y) = highest z inside both; plus the deck carried out to the face and
+    # rounded over onto it with a 60 mm radius
+    jd = np.searchsorted(xs, 5150.0); R_DECK = 60.0
+    rows = np.nonzero((zs3 >= Z_FLOOR - 4) & (zs3 <= Z_T1))[0]
+    zz = zs3[rows]
+    ay = np.abs(ys2)
+    y0z = Y0[rows]
+    y0t = float(np.nanmin(Y0[(zs3 > Z_T1 - 60) & (zs3 <= Z_T1)]))
+    g0t = G0[np.searchsorted(zs, Z_T1)]
+    Grows = G[np.searchsorted(zs, zz)]                       # (z, y)
+    hd = H[:, jd].copy()
+    for j in range(jd, len(xs)):
+        x = xs[j]
+        Sz = S[rows, j]                                       # (z,)
+        inside = (ay[None, :] <= np.nan_to_num(Sz, nan=-1.0)[:, None]) & \
+                 ((ay[None, :] > np.nan_to_num(y0z, nan=1e4)[:, None]) | (x <= L - np.nan_to_num(Grows, nan=1e5)))
+        hz = np.where(inside.any(0), zz[::-1][np.argmax(inside[::-1], 0)], np.nan)
+        x1 = L - g0t - CROWN * np.minimum(ay / y0t, 1.0) ** 2 - R_DECK
+        ext = np.where(x <= x1, hd, hd - R_DECK + np.sqrt(np.maximum(R_DECK**2 - (x - x1)**2, 0.0)))
+        ext = np.where((x <= x1 + R_DECK) & np.isfinite(hd), ext, np.nan)   # the sides trim the corners
+        hn = np.fmax(hz, ext)
+        w = np.clip((x - 5150.0) / 60.0, 0, 1)                # fade in from the GLB deck
+        H[:, j] = np.where(np.isfinite(H[:, j]) & np.isfinite(hn), (1 - w) * H[:, j] + w * hn,
+                           np.where(w < 0.5, H[:, j], hn))
+    res = dict(res)
+    res['G_sil'] = silhouette(res['G'][2])                  # the rear view still sees the full body width
+    res['G'] = (ys, zs, G); res['S'] = (xs3, zs3, S); res['H'] = (xs, ys2, H)
+    np.savez("out/tail.npz", z=zs3, y0=Y0)
+    return res
+
 def slope_info(D):
     """Per-cell surface slope seen by this view (mm depth per mm), from the gentler of the two
     neighbours on each axis so a single depth step does not count as grazing."""
@@ -112,6 +217,17 @@ def slope_info(D):
         return np.nanmin(np.abs(np.stack([f, b])), 0)          # gentler side of the cell
     s = np.hypot(np.nan_to_num(axis_slope(0), nan=0.0), np.nan_to_num(axis_slope(1), nan=0.0))
     return np.where(np.isfinite(D), s, np.nan)
+
+def smooth_slope(s, sigma=3):
+    """Slope used for slack and grazing: smoothed, so neither flickers from cell to cell (that
+    flicker left dots and ripples on the panels)."""
+    return nsmooth(np.nan_to_num(s, nan=0.0), np.isfinite(s), sigma)
+
+def clean_mask(g):
+    """Grazing mask without specks or pin holes."""
+    st = np.ones((3, 3), bool)
+    g = ndimage.binary_opening(g, st, iterations=2)
+    return ndimage.binary_closing(g, st, iterations=2) | g
 
 def slack_from(s):
     return np.minimum(3.0 * np.nan_to_num(s, nan=0.0), 8.0)
@@ -206,10 +322,17 @@ def clean_maps(res):
         a, b, D = res[k]
         Y, Z = np.meshgrid(a, b)
         D = np.where((Z < 420) & (np.abs(Y) > 560) & (D > 420), np.nan, D)   # tyres seen under the bumper
+        if k == 'F':
+            # nose corners / headlamp surround: smoother outside the grille (they wrinkled)
+            # the GLB's headlamp cavities dent the fender corners: fill recesses up to ~160 mm wide there
+            reg = (np.abs(Y) > 500) & (Z > 520) & (Z < 1000) & np.isfinite(D)
+            Dn = extend_nearest(np.where(np.isfinite(D), D, 0.0), np.isfinite(D))
+            D = np.where(reg, np.minimum(D, ndimage.grey_opening(Dn, size=(41, 41))), D)
+            D = np.where(np.abs(Y) < 560, D, nsmooth(np.nan_to_num(D, nan=0.0), np.isfinite(D), 6))
         D = extend_down(D, b, Z_FLOOR, 420.0, outward='min')
         D = fill_down(D, np.isfinite(D))                         # lower-front slot, deck-lid slot, panel ripple
-        s = slope_info(D)
-        g = np.nan_to_num(s, nan=0.0) > 2.5
+        s = smooth_slope(slope_info(D))
+        g = clean_mask(np.nan_to_num(s, nan=0.0) > 2.5)
         Dc = np.where(g, -1e5, D - slack_from(s))
         if k == 'F':
             Y, Z = np.meshgrid(a, b)
@@ -222,8 +345,11 @@ def clean_maps(res):
             edge = (ay > 532) & (ay < 650) & (Z >= grille_top(Y) - 160) & (Z <= grille_top(Y))
             Dc = np.where(core, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG), Dc)
             Dc = np.where(edge, np.minimum(np.where(Dc < -1e4, 1e5, Dc), XG + 2.5 * (ay - 532)), Dc)
+        else:
+            # rear window / deck lid come from the top view only (the rear view's noise dented them)
+            Dc = np.where((np.abs(Y) < 800) & (Z > 1100.0), -1e5, Dc)
         out[k] = (a, b, np.where(np.isfinite(D), Dc, -1e5))      # gap inside the outline: no constraint
-        out[k + '_miss'] = ~silhouette(D)
+        out[k + '_miss'] = ~(silhouette(D) | res.get(k + '_sil', False))
     out['H_raw'] = res['H'][2].copy(); out['S_raw'] = res['S'][2].copy()
     for k in ('H', 'B', 'S'):
         a, b, D = res[k]
@@ -244,6 +370,11 @@ def clean_maps(res):
                 lo, hi = D[r, ia], D[r, ib]
                 if np.isfinite(lo) and np.isfinite(hi):
                     D[r, ia:ib + 1] = np.fmax(D[r, ia:ib + 1], np.linspace(lo, hi, ib - ia + 1))
+            # round off the kinks where the bridge meets hood and screen
+            c0, c1 = ia - 20, ib + 20
+            blk = D[:, c0:c1 + 1]
+            sm = nsmooth(np.nan_to_num(blk, nan=0.0), np.isfinite(blk), 6)
+            D[rows, c0:c1 + 1] = np.where(np.isfinite(blk[rows]), sm[rows], blk[rows])
             valid = np.isfinite(D)
         if k == 'H':
             D = bridge_wheels(D, a, np.abs(b) > 540)                  # fender tops over the arches
@@ -264,17 +395,20 @@ def clean_maps(res):
         if k in ('H', 'S'):
             raw = out[k + '_raw']
             out[k + '_raw'] = np.where(np.isfinite(D), np.fmax(np.nan_to_num(raw, nan=-1e4), D), raw)
-        Ds = nsmooth(np.nan_to_num(D, nan=0.0), valid, {'H': 6, 'B': 4, 'S': 4}[k])
-        s = slope_info(Ds)
+        Ds = nsmooth(np.nan_to_num(D, nan=0.0), valid, {'H': 9, 'B': 4, 'S': (4, 10)}[k])
+        s = smooth_slope(slope_info(Ds))
         sgn = -1.0 if k == 'B' else 1.0                       # H, S are upper bounds; B is a lower bound
         out[k] = (a, b, Ds + sgn * slack_from(s))
-        out[k + '_graze'] = np.nan_to_num(s, nan=0.0) > 2.5
+        out[k + '_graze'] = clean_mask(np.nan_to_num(s, nan=0.0) > 2.5)
         if k in ('H', 'S'):
             # the hard limit only trims real protrusions: never below the smoothed shape itself
             raw = out[k + '_raw']
             out[k + '_raw'] = np.where(np.isfinite(Ds), np.fmax(np.nan_to_num(raw, nan=-1e4), Ds + slack_from(s)), raw)
         if k == 'H':
             out['H_smooth'] = Ds
+    # the cowl bridge lifts the top above the GLB's own side outline: no side hard limit there
+    xs3_, zs3_ = out['S'][0], out['S'][1]
+    out['S_raw'][np.ix_(zs3_ > 900, (xs3_ >= 1400) & (xs3_ <= 1740))] = np.nan
     # ---- grille top -> hood: Hermite blend from the grille top edge to the hood at X_HOOD ----
     xs, ys2, H = out['H']; Hs = out['H_smooth']
     j0, j1 = np.searchsorted(xs, XG), np.searchsorted(xs, X_HOOD)
@@ -330,10 +464,14 @@ def field(cm):
     ys, zs, F = cm['F']; _, _, G = cm['G']
     xs, ysh, H = cm['H']; _, _, B = cm['B']; xs3, zs3, S = cm['S']
     # body is inside every view's silhouette (misses -> outside); grazing cells add no constraint
-    Fv = np.where(cm['F_miss'], 1e5, F)              # x must be >= F
-    Gv = np.where(cm['G_miss'], 1e5, G)              # x must be <= L - G
+    # silhouettes are grown by 12 mm: the outline of one view must never cut a surface that another
+    # view defines (its jagged 4 mm edge cut dents into the roof crown); the hard limits (+10 mm) and
+    # the other views still bound the body there
+    grow = lambda m: ndimage.binary_dilation(m, iterations=3)
+    Fv = np.where(~grow(~cm['F_miss']), 1e5, F)      # x must be >= F
+    Gv = np.where(~grow(~cm['G_miss']), 1e5, G)      # x must be <= L - G
     # outside a view's silhouette: excluded; a pin hole inside it: no constraint from that view
-    Hin, Sin = silhouette(H), silhouette(S)
+    Hin, Sin = grow(silhouette(H)), grow(silhouette(S))
     Hv = np.where(np.isfinite(H), np.where(cm['H_graze'], 1e5, H), np.where(Hin, 1e5, -1e5))
     Sv = np.where(np.isfinite(S), np.where(cm['S_graze'], 1e5, S), np.where(Sin, 1e5, -1e5))
     # keep silhouettes: a grazing cell next to a miss still bounds the body
@@ -364,13 +502,19 @@ if __name__ == "__main__":
         res = pickle.load(open("out/hull_res.pkl", "rb"))
     else:
         res = maps(mesh); pickle.dump(res, open("out/hull_res.pkl", "wb"))
+    res = square_tail(res)
     print("maps", round(time.time() - T), flush=True)
     np.savez("out/hull_maps.npz", **{k + '_' + n: v for k, t in res.items() for n, v in zip('abD', t)})
     cm = clean_maps(res)
     xg, yg, zg, phi = field(cm); print("field", phi.shape, round(time.time() - T), flush=True)
     # iso level slightly off zero: flat fills and blends land exactly on grid values, and an exact
     # zero at a grid point is what makes marching cubes emit non-manifold edges
-    vtx, faces, _, _ = measure.marching_cubes(np.pad(phi, 1, constant_values=-40), 0.37)
+    # values landing exactly on the level (they do: maps and grids share 4 mm steps) give degenerate,
+    # non-manifold cells, which smoothing then drags into dents: nudge them off the level
+    ISO = 0.37
+    near = np.abs(phi - ISO) < 0.03
+    phi[near] = np.where(phi[near] >= ISO, ISO + 0.03, ISO - 0.03)
+    vtx, faces, _, _ = measure.marching_cubes(np.pad(phi, 1, constant_values=-40), ISO)
     vtx = (vtx - 1) * P + np.array([xg[0], yg[0], zg[0]])
     m = trimesh.Trimesh(vtx, faces[:, ::-1], process=True)
     parts = m.split(only_watertight=False) if len(m.faces) < 0 else None
