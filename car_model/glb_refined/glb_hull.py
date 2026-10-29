@@ -414,16 +414,24 @@ def clean_maps(res):
     j0, j1 = np.searchsorted(xs, XG), np.searchsorted(xs, X_HOOD)
     xx = xs[j0:j1 + 1]
     Hb = H.copy(); Hr = out['H_raw']
-    t = (xx - xx[0]) / (xx[-1] - xx[0])
-    h00, h10, h01, h11 = 2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t, -2*t**3 + 3*t**2, t**3 - t**2
-    span = xx[-1] - xx[0]
+    X_ARC = 230.0                                        # length of the arc from the grille top edge
+    fit = (xs >= 560.0) & (xs <= 900.0)
     for r, y in enumerate(ys2):
         w = blend_weight(y)
-        if w <= 0 or not np.isfinite(Hs[r, j1]):
+        ok = fit & np.isfinite(Hs[r])
+        if w <= 0 or ok.sum() < 20:
             continue
-        z0, z1 = grille_top(y), Hs[r, j1]
-        s1 = (Hs[r, j1 + 3] - Hs[r, j1 - 3]) / (xs[j1 + 3] - xs[j1 - 3])
-        curve = h00 * z0 + h10 * span * 0.85 + h01 * z1 + h11 * span * s1
+        # hood line (straight fit behind the GLB's nose bulge), carried forward to the grille; the nose
+        # is that line minus a quadratic fall-off: one clean arc from the grille top, tangent to the
+        # hood at X_ARC behind it, no hump and no dip
+        p = np.polyfit(xs[ok], Hs[r, ok], 1)
+        hood = np.polyval(p, xx)
+        d0 = np.polyval(p, XG) - grille_top(y)
+        t = np.clip((xx - XG) / X_ARC, 0, 1)
+        curve = hood - d0 * (1 - t) ** 2
+        s_ = np.clip((xx - 420.0) / (xx[-1] - 420.0), 0, 1)         # hand over to the real hood by X_HOOD
+        hs = Hs[r, j0:j1 + 1]
+        curve = np.where(np.isfinite(hs), (1 - s_) * curve + s_ * hs, curve)
         cur = Hb[r, j0:j1 + 1]
         have = np.isfinite(cur)
         # blend with surface that exists; create new surface only inside the grille width

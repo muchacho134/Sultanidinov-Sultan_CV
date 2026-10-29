@@ -177,6 +177,25 @@ def tess(shapes, tol=0.25):
         out.append(m)
     return out
 
+def drop_slivers(b):
+    """Remove tiny boolean leftovers, including ones touching the body only along a single edge:
+    components are found through manifold edges only."""
+    b = b.copy(); b.merge_vertices()
+    e = b.edges_sorted.reshape(-1, 3, 2)
+    key = e[..., 0].astype(np.int64) * len(b.vertices) + e[..., 1]
+    k, inv, cnt = np.unique(key.ravel(), return_inverse=True, return_counts=True)
+    fid = np.repeat(np.arange(len(b.faces)), 3)
+    good = cnt[inv] == 2
+    order = np.argsort(inv[good], kind='stable')
+    pairs = fid[good][order].reshape(-1, 2)
+    import scipy.sparse as sp
+    from scipy.sparse.csgraph import connected_components
+    g = sp.coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(len(b.faces),) * 2)
+    n, lab = connected_components(g, directed=False)
+    big = np.argmax(np.bincount(lab))
+    b.update_faces(lab == big); b.remove_unreferenced_vertices()
+    return b
+
 def union_all(ms):
     M = None
     for m in ms:
@@ -197,9 +216,7 @@ if __name__ == "__main__":
     B = body - union_all(cuts)
     B = B + union_all(adds)
     b = from_manifold(B)
-    parts = b.split(only_watertight=False)
-    if len(parts) > 1:                                    # drop boolean slivers
-        b = max(parts, key=lambda p: len(p.faces))
+    b = drop_slivers(b)
     print("body", len(b.faces), "watertight", b.is_watertight, "volume", round(b.volume / 1e9, 3), round(time.time() - T, 1), flush=True)
     b.export("out/glb_refined_body.stl")
     ws = tess([wheel(xc, sg) for xc in WHEELS for sg in (1, -1)])
