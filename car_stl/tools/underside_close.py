@@ -109,8 +109,19 @@ holes = []
 for k in WELL:
     xc, c, wall = chord(k)
     for sg in (1, -1):
-        rect = sbox(xc - c, -3000, xc + c, -wall) if sg < 0 else sbox(xc - c, wall, xc + c, 3000)
-        holes.append(rect.buffer(-R_IN, join_style=1).buffer(R_IN, join_style=1) if False else rect)
+        # true opening: the well cylinder cut by the underside surface, x = xc -/+ sqrt(rw^2 - (za - z)^2)
+        xc_, rw_, wall_, za_, _zfl = WELL[k]
+        yy = np.linspace(wall_, 1300.0, 140)
+        side = []
+        for sgn_x in (-1, 1):
+            xs_ = np.full(len(yy), xc_ + sgn_x * c)
+            for _ in range(6):                                # fixed point: z depends on where we are
+                zz = Zf(xs_, -yy)
+                xs_ = xc_ + sgn_x * np.sqrt(np.clip(rw_ ** 2 - (za_ - zz) ** 2, 0, None))
+            side.append(xs_)
+        poly_pts = list(zip(side[0], -yy)) + list(zip(side[1][::-1], -yy[::-1]))
+        hole = SP(poly_pts).buffer(0)
+        holes.append(hole if sg < 0 else SP([(x, -y) for x, y in hole.exterior.coords]))
 REG = full.difference(unary_union(holes))
 REG = REG.buffer(R_OUT, join_style=1).buffer(-2 * R_OUT, join_style=1).buffer(R_OUT, join_style=1)  # round convex + concave corners
 REG = REG.buffer(-R_IN, join_style=1).buffer(R_IN, join_style=1)                                   # bigger radius on the inner slot corners
