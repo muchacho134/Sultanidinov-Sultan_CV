@@ -45,7 +45,7 @@ Z = np.full(XX.size, np.nan); k_ = UNDER[ti]; Z[ri[k_]] = loc[k_, 2]; Z = Z.resh
 valid = ~np.isnan(Z)
 # fill holes (nearest) for smoothing, then smooth lightly
 idx = distance_transform_edt(~valid, return_distances=False, return_indices=True)
-Zs = gaussian_filter(Z[tuple(idx)], 1.5)
+Zs = gaussian_filter(Z[tuple(idx)], 2.2)          # smoother field
 # ---- 2. snap the flat floors
 for x0, x1, zf in FLOORS:
     sel = (XX >= x0) & (XX <= x1)
@@ -53,66 +53,119 @@ for x0, x1, zf in FLOORS:
     Zs = w * zf + (1 - w) * Zs
 zf_ = RegularGridInterpolator((xs, ys), Zs, bounds_error=False, fill_value=None)
 Zf = lambda x, y: zf_(np.c_[np.broadcast_to(x, np.broadcast(x, y).shape).ravel(), np.broadcast_to(y, np.broadcast(x, y).shape).ravel()])
-# ---- 3. plan edge: outermost valid y per x (outside the openings), faired; straight where nearly straight
+# ---- 3. plan outline: one continuous curve, nose tip -> tail tip, through (bridging) the openings
 edge = []
 for i, x in enumerate(xs):
     v = np.where(valid[i] & ~in_opening(x, ys))[0]
     if len(v) and not any(abs(x - chord(k)[0]) < chord(k)[1] + 20 for k in WELL):
         edge.append((x, ys[v[0]]))
 edge = np.array(edge)
-segs = [s for s in np.split(edge, np.where(np.diff(edge[:, 0]) > 2 * G)[0] + 1) if len(s) > 8]
-E = []
-for s in segs:
-    x, y = s[:, 0], gaussian_filter1d(s[:, 1], 2)
-    n = max(4, int(np.ptp(x) / 150) + 3)
-    kn = np.r_[[x[0]] * 4, np.linspace(x[0], x[-1], n - 2)[1:-1], [x[-1]] * 4]
-    yf = make_lsq_spline(x, y, kn, 3)(x)
-    # straighten a central run whose wobble is small
-    mid = np.abs(yf - np.median(yf)) < STRAIGHT
-    if STRAIGHT > 0 and mid.mean() > 0.5:
-        r = np.where(mid)[0]; a, b = r[0], r[-1]
-        yf[a:b + 1] = np.median(yf[a:b + 1])
-        bl = 8                                            # blend the ends into the curve
-        for j in range(1, bl):
-            if a - j >= 0: yf[a - j] = yf[a - j] * (j / bl) + yf[a] * (1 - j / bl)
-            if b + j < len(yf): yf[b + j] = yf[b + j] * (j / bl) + yf[b] * (1 - j / bl)
-    E.append(np.c_[x, yf])
+x_tf, x_tr = xs[np.where(valid.any(1))[0][0]], xs[np.where(valid.any(1))[0][-1]]
+cuts = sorted([chord(k)[0] - chord(k)[1] for k in WELL] + [chord(k)[0] + chord(k)[1] for k in WELL])
+spans = [(x_tf, cuts[0]), (cuts[1], cuts[2]), (cuts[3], x_tr)]
+OXs, OYs = [], []
+for j, (a_, b_) in enumerate(spans):
+    lo_ = a_ + (80 if j > 0 else -30); hi_ = b_ - (80 if j < 2 else -30)   # skip the pinch next to an opening
+    pe = edge[(edge[:, 0] >= lo_) & (edge[:, 0] <= hi_)]
+    if j == 0: pe = np.r_[np.array([(x_tf, 0.0)] * 6), pe]
+    if j == 2: pe = np.r_[pe, np.array([(x_tr, 0.0)] * 6)]
+    u = np.r_[0, np.cumsum(np.hypot(*np.diff(pe, axis=0).T))]; u /= u[-1]
+    nk = max(4, int((b_ - a_) / 220))
+    kn = np.r_[[0] * 4, np.linspace(0, 1, nk)[1:-1], [1] * 4]
+    wts = np.where(pe[:, 1] == 0.0, 50.0, 1.0)
+    sx = make_lsq_spline(u, pe[:, 0], kn, 3, w=wts); sy = make_lsq_spline(u, pe[:, 1], kn, 3, w=wts)
+    uu = np.linspace(0, 1, 1500); X_, Y_ = sx(uu), np.minimum(sy(uu), 0.0)
+    if j == 0: X_[0], Y_[0] = x_tf, 0.0
+    if j == 2: X_[-1], Y_[-1] = x_tr, 0.0
+    o_ = np.argsort(X_); X_, Y_ = X_[o_], Y_[o_]
+    keep_ = (X_ >= a_) & (X_ <= b_); X_, Y_ = X_[keep_], Y_[keep_]
+    # run on to the opening with the end slope (no pinch)
+    if j < 2:
+        g = (Y_[-1] - Y_[-20]) / (X_[-1] - X_[-20]); xe_ = np.linspace(X_[-1], b_, 30)[1:]
+        X_ = np.r_[X_, xe_]; Y_ = np.r_[Y_, Y_[-1] + 0.5 * g * (xe_ - X_[-1])]
+    if j > 0:
+        g = (Y_[19] - Y_[0]) / (X_[19] - X_[0]); xs_ = np.linspace(a_, X_[0], 30)[:-1]
+        X_ = np.r_[xs_, X_]; Y_ = np.r_[Y_[0] + 0.5 * g * (xs_ - X_[0]), Y_]
+    OXs.append(X_); OYs.append(Y_)
+OXs, OYs = np.concatenate(OXs), np.concatenate(OYs)
+def Ye(x):
+    return np.interp(x, OXs, OYs)
+def Yguide(x):
+    """outline with a soft bridge across each opening (only used to space the flow lines)"""
+    x = np.asarray(x, float); y = Ye(x)
+    for k in WELL:
+        xc, c, wall = chord(k); a_, b_ = xc - c - 80, xc + c + 80   # start before the corner pinch
+        t = np.clip((x - a_) / (b_ - a_), 0, 1); t = t * t * (3 - 2 * t)
+        y = np.where((x > a_) & (x < b_), Ye(a_) * (1 - t) + Ye(b_) * t, y)
+    return y
 W = {}
-for j, e in enumerate(E):
-    W[f"outer_edge_{j}"] = np.c_[e, Zf(e[:, 0], e[:, 1])]
-Ye = lambda x: np.interp(x, np.concatenate([e[:, 0] for e in E]), np.concatenate([e[:, 1] for e in E]))
-# ---- 4. other wires
-xl = np.linspace(xs[0], xs[-1], 900)
+# outer edge, split exactly at the opening sides
+for j, (a, b) in enumerate(spans):
+    xx = np.linspace(a, b, max(60, int((b - a) / 5)))
+    W[f"outer_edge_{j}"] = np.c_[xx, Ye(xx), Zf(xx, Ye(xx))]
+# ---- 4. other wires (all from the same field and outline -> exact intersections)
+xl = np.unique(np.r_[np.linspace(x_tf, x_tr, 900), cuts])
 W["centreline"] = np.c_[xl, 0 * xl, Zf(xl, 0 * xl)]
 for k in WELL:
     xc, c, wall = chord(k); zf = WELL[k][4]
-    W[f"{k}_opening_inner"] = np.array([(xc - c, -wall, zf), (xc + c, -wall, zf)])
+    xi = np.linspace(xc - c, xc + c, 60)
+    W[f"{k}_opening_inner"] = np.c_[xi, np.full(60, -wall), Zf(xi, np.full(60, -wall))]
     for xe in (xc - c, xc + c):
-        yy = np.linspace(-wall, Ye(xe + (-25 if xe < xc else 25)), 50)
+        yy = np.linspace(-wall, Ye(xe), 50)
         W[f"{k}_opening_side_{int(xe)}"] = np.c_[np.full(50, xe), yy, Zf(np.full(50, xe), yy)]
-# lengthwise flow lines: fixed fraction of the way from the centreline to the edge (follow the outline)
-ax_ = np.concatenate([e[:, 0] for e in E]); ay_ = np.concatenate([e[:, 1] for e in E])
-kn_ = np.r_[[ax_[0]] * 4, np.linspace(ax_[0], ax_[-1], 14)[1:-1], [ax_[-1]] * 4]
-_sp = make_lsq_spline(ax_, ay_, kn_, 3)                        # one smooth outline, bridges the openings
-Yflow = lambda x: np.minimum(_sp(np.clip(x, ax_[0], ax_[-1])), -1.0)
-for f in (0.2, 0.4, 0.6, 0.8, 0.92):
-    yv = f * np.where(np.isin(np.round(xl), np.round(ax_)) | True, Yflow(xl), 0)
-    yv = np.maximum(yv, Ye(xl) + 8)                            # stay inside the real edge
+for f in (0.2, 0.4, 0.6, 0.8, 0.92):                           # flow lines: converge on the tips
+    yv = f * Yguide(xl)
     ok = ~in_opening(xl, yv)
+    for xv in cuts:                                           # end exactly on the opening sides
+        ok[np.argmin(np.abs(xl - xv))] = True
     r_ = np.where(ok)[0]
     for j, r in enumerate(np.split(r_, np.where(np.diff(r_) > 1)[0] + 1)):
         if len(r) > 3: W[f"flow_{int(f * 100)}_{j}"] = np.c_[xl[r], yv[r], Zf(xl[r], yv[r])]
-for xv in np.arange(-2100, 2200, 300.0):
-    yy = np.linspace(0, Ye(xv), 120); keep = ~in_opening(xv, yy)
+for xv in np.arange(-2100, 2200, 300.0):                       # crosswise: centreline -> outline
+    win = [k for k in WELL if abs(xv - chord(k)[0]) < chord(k)[1]]
+    yy = np.linspace(0, -chord(win[0])[2] if win else Ye(xv), 150); keep = ~in_opening(xv, yy)
+    keep[-1] = True
     r = np.where(keep)[0]
     if len(r) and (np.diff(r) > 1).any(): r = r[: np.argmax(np.diff(r) > 1) + 1]
+    if len(r) and r[-1] < len(yy) - 1:                          # stops at an opening: end on its inner edge
+        k_ = min(WELL, key=lambda k: abs(chord(k)[0] - xv)); yy[r[-1]] = -chord(k_)[2]
     W[f"cross_x{int(xv)}"] = np.c_[np.full(len(r), xv), yy[r], Zf(np.full(len(r), xv), yy[r])]
+# ---- smooth the outer-edge height, then pull the wires that end on it onto the smoothed edge
+EZ = {}
+for k in [k for k in W if k.startswith("outer_edge")]:
+    v = W[k]; t = v[:, 0]
+    n = max(4, int(np.ptp(t) / 300) + 3)
+    kn_ = np.r_[[t[0]] * 4, np.linspace(t[0], t[-1], n - 2)[1:-1], [t[-1]] * 4]
+    ws_ = np.ones(len(t)); ws_[[0, -1]] = 30.0                     # keep the end heights
+    v[:, 2] = make_lsq_spline(t, v[:, 2], kn_, 3, w=ws_)(t); W[k] = v; EZ[k] = v
+edge_pts = np.vstack(list(EZ.values()))
+from scipy.spatial import cKDTree as _T
+_et = _T(edge_pts[:, :2])
+for k in [k for k in W if k.startswith("cross_x") or "opening_side" in k]:
+    v = W[k]; d, i = _et.query(v[-1, :2])
+    if d < 15:
+        dz = edge_pts[i, 2] - v[-1, 2]
+        s_ = np.r_[0, np.cumsum(np.linalg.norm(np.diff(v[:, :2], axis=0), axis=1))]; s_ /= s_[-1]
+        v[:, 2] += dz * np.clip((s_ - 0.6) / 0.4, 0, 1) ** 2         # blend over the last 40 %
+        W[k] = v
+# ---- connection check: every wire end must lie on another wire
+allp = np.vstack([v for v in W.values()])
+from scipy.spatial import cKDTree
+bad = []
+for k, v in W.items():
+    for e in (v[0], v[-1]):
+        others = np.vstack([w for kk, w in W.items() if kk != k])
+        d = cKDTree(others).query(e)[0]
+        if d > 6: bad.append((k, round(d, 1)))
+print("loose wire ends (> 6 mm from any other wire):", bad if bad else "none")
+for k, v in W.items():
+    if k.startswith("flow"): print("  %s: %.0f,%.0f -> %.0f,%.0f" % (k, v[0, 0], v[0, 1], v[-1, 0], v[-1, 1]))
 json.dump({k: v.tolist() for k, v in W.items()}, open(OUT, "w"))
 # ---- closeness to the mesh
 cu = c_[UNDER & (c_[:, 1] <= 0)]
 ins = cu[:, 1] > Ye(cu[:, 0]) + 5
 d = cu[ins, 2] - Zf(cu[ins, 0], cu[ins, 1])
 print("vs STL underside (vertical): median %.1f  p90 %.1f  p99 %.1f mm" % tuple(np.percentile(np.abs(d), [50, 90, 99])))
-ed = np.concatenate([np.abs(gaussian_filter1d(s[:, 1], 2) - Ye(s[:, 0])) for s in segs])
+ed = np.abs(edge[:, 1] - Ye(edge[:, 0]))
 print("plan edge vs STL: median %.1f  p90 %.1f mm" % (np.median(ed), np.percentile(ed, 90)))
 print("wires:", len(W))
