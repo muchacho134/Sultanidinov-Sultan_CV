@@ -185,6 +185,11 @@ for k in [k for k in W if k.startswith("outer_edge")]:
     for i in (0, -1):
         j = np.argmin(np.linalg.norm(cl[:, :2] - v[i, :2], axis=1))
         if np.linalg.norm(cl[j, :2] - v[i, :2]) < 20: v[i] = cl[j]
+    for i in (0, -1):                                  # tip stops short of y = 0: run on square to the centreline
+        if -250 < v[i, 1] < -3:
+            yy = np.linspace(v[i, 1], 0.0, 12)[1:]
+            ext = np.c_[np.full(11, v[i, 0]), yy, Zf(np.full(11, v[i, 0]), yy)]
+            v = np.r_[ext[::-1], v] if i == 0 else np.r_[v, ext]
     W[k] = v
 # ---- connection check: every wire end must lie on another wire
 allp = np.vstack([v for v in W.values()])
