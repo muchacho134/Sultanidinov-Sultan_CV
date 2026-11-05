@@ -21,7 +21,11 @@ for lab in ("front", "rear"):
     def cyl_n(c, w=w):
         v = np.c_[w["x"] - c[:, 0], np.zeros(len(c)), w["z"] - c[:, 2]]   # well surface faces the axle
         return v / np.linalg.norm(v, axis=1)[:, None]
-    SURF.append((f"{lab} well cylinder", cyl_d, cyl_n))
+    SURF.append((f"{lab} well cylinder", lambda c, f=cyl_d, w=w: np.where(c[:, 2] > w["z"] - 1, f(c), 1e9), cyl_n))
+    for sgn in (-1, 1):   # straight well walls below the axle: planes x = xc -/+ rw, facing into the well
+        SURF.append((f"{lab} well wall {'front' if sgn < 0 else 'rear'}",
+                     lambda c, w=w, rw=rw, sgn=sgn: np.where((c[:, 2] < w["z"] + 1) & (np.abs(c[:, 1]) > w["wall"] - 5), c[:, 0] - (w["x"] + sgn * rw), 1e9),
+                     lambda c, sgn=sgn: np.tile([-sgn, 0, 0], (len(c), 1))))
 lab = np.full(len(F), -1)
 for k, (name, dfn, nfn) in enumerate(SURF):
     on = half & (lab < 0) & (np.abs(dfn(c)) < TOL) & (np.sum(n * nfn(c), 1) > COS)
@@ -30,7 +34,7 @@ for k, (name, dfn, nfn) in enumerate(SURF):
 done = A[half & (lab >= 0)].sum(); tot = A[half].sum()
 print("done %.2f of %.2f m2 (%.0f %%); dough left %.2f m2" % (done / 1e6, tot / 1e6, 100 * done / tot, (tot - done) / 1e6))
 np.save(sys.argv[3], lab); json.dump([s[0] for s in SURF], open(sys.argv[3].replace(".npy", "_names.json"), "w"))
-pal = np.array([[0.30, 0.55, 0.95], [0.55, 0.35, 0.90], [0.30, 0.80, 0.45], [0.95, 0.55, 0.20], [0.30, 0.80, 0.45], [0.95, 0.55, 0.20]])
+pal = np.array([[0.30, 0.55, 0.95], [0.55, 0.35, 0.90]] + [[0.30, 0.80, 0.45], [0.95, 0.55, 0.20], [0.95, 0.80, 0.25], [0.95, 0.80, 0.25]] * 2)
 C = np.where((lab >= 0)[:, None], pal[np.maximum(lab, 0)], [0.86, 0.87, 0.89])
 V = np.asarray(m.vertices, float)
 render_sheet(V, F[half], C[half], sys.argv[4], N=vertex_normals(V, F))

@@ -15,7 +15,10 @@ for lab in ("front", "rear"):
         cyl = trimesh.creation.cylinder(radius=rw, height=y1 - y0, sections=256)
         cyl.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
         cyl.apply_translation([w["x"], (y0 + y1) / 2, w["z"]])
-        tools.append(cyl)        # circular arch all the way down, as on the original
+        # Tesla-style well: arch cylinder above the axle, straight vertical walls below it
+        box = trimesh.creation.box(extents=[2 * rw, y1 - y0, w["z"] + 200])
+        box.apply_translation([w["x"], (y0 + y1) / 2, (w["z"] - 200) / 2])
+        tools += [cyl, box]
 cutter = trimesh.boolean.union(tools, engine="manifold")
 body = trimesh.boolean.difference([m, cutter], engine="manifold")
 print("body: tris %d  watertight %s  volume %.3f m3 (was %.3f)  bodies %d" %
