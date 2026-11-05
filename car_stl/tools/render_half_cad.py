@@ -15,7 +15,7 @@ def add(shape, col_fn):
         v, t = mesh(f, 0.6)
         if len(t) == 0: continue
         Vs.append(np.asarray(v, float)); Fs.append(np.asarray(t) + off); Cs.append(np.tile(col_fn(), (len(t), 1))); off += len(v)
-add(load(patches), lambda: rng.uniform(0.45, 0.95, 3) * [0.95, 0.97, 1.0])
+add(load(patches), (lambda: (0.86, 0.87, 0.90)) if "--grey" in sys.argv else (lambda: rng.uniform(0.45, 0.95, 3) * [0.95, 0.97, 1.0]))
 names = json.load(open(done.replace(".brep", "_names.json")))
 it = iter(names)
 COL = {"floor": (0.55, 0.35, 0.9), "cylinder": (0.95, 0.55, 0.2), "slot": (0.3, 0.8, 0.45)}

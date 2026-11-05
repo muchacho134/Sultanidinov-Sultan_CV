@@ -29,7 +29,7 @@ from OCP.BRep import BRep_Builder
 from OCP.BRepTools import BRepTools
 
 MESH, LABELS, PARTS, OUT = sys.argv[1:5]
-MAX_TILT, GRID, SMOOTH = 70.0, 8.0, 0.8           # deg, mm grid step, smoothing (grid cells)
+MAX_TILT, GRID, SMOOTH = 70.0, 10.0, 1.0          # deg, mm grid step, smoothing (grid cells)
 OVERLAP, CENTRE_PUSH = 6.0, 45.0                    # trim overlap with neighbours; push past y=0
 m = trimesh.load(MESH, force='mesh'); lab0 = np.load(LABELS); P = json.load(open(PARTS))
 F, V, c, n, A = m.faces, m.vertices, m.triangles_center, m.face_normals, m.area_faces
@@ -43,6 +43,11 @@ for k, zf in (("front", 96.8), ("rear", 114.5)):
     near_slot = (np.abs(c[:, 1] + w["wall"]) < 30) & (np.hypot(c[:, 0] - w["x"], c[:, 2] - w["z"]) < rw + 30)
     dough &= ~(near_well | near_cyl | near_slot)
 dough &= ~((c[:, 2] < 145) & (c[:, 1] > -800) & (c[:, 0] > -1880) & (c[:, 0] < 1740) & (n[:, 2] < -0.5))
+if len(sys.argv) > 5:          # fill pass: surface only what the first pass left uncovered
+    unc = np.zeros(len(V), bool); unc[np.load(sys.argv[5])] = True
+    dough = (c[:, 1] <= 5) & (unc[F].sum(1) >= 2)
+    # never re-surface the finished faces themselves
+    dough &= (lab0 < 0)
 print("dough faces %d  area %.2f m2" % (dough.sum(), A[dough].sum() / 1e6))
 
 # ---------------------------------------------------------------- patches
@@ -111,6 +116,19 @@ while queue:
 seeds = np.where(lab >= 0)[0]
 dist, _, src = dijkstra(G, indices=seeds, min_only=True, return_predecessors=True)
 lab = np.where(dough & np.isfinite(dist), lab[np.maximum(src, 0)], -1)
+# merge slivers (< MIN_PATCH m2) into the neighbour they share the most edge with
+MIN_PATCH = 0.03e6
+for _ in range(5):
+    changed = False
+    areas = {p: A[lab == p].sum() for p in np.unique(lab[lab >= 0])}
+    for p, ar in sorted(areas.items(), key=lambda kv: kv[1]):
+        if ar >= MIN_PATCH: continue
+        e_ = (lab[adj[:, 0]] == p) ^ (lab[adj[:, 1]] == p)
+        other = np.where(lab[adj[e_, 0]] == p, lab[adj[e_, 1]], lab[adj[e_, 0]])
+        other = other[other >= 0]
+        if len(other):
+            lab[lab == p] = np.bincount(other).argmax(); changed = True
+    if not changed: break
 ids = [p for p in np.unique(lab[lab >= 0])]
 print("patches:", len(ids))
 np.save(OUT.replace(".brep", "_labels.npy"), lab)
@@ -151,6 +169,17 @@ for p in ids:
     pg = _Poly(B).buffer(0).buffer(OVERLAP, join_style=1)
     if pg.geom_type != "Polygon":
         pg = max(pg.geoms, key=lambda g: g.area)
+    if on_c.any():
+        # clip at the centreline in (u, v): world y = ctr.y + u*e1.y + v*e2.y + z*n.y; z ~ mean height
+        from shapely.geometry import Polygon as _P2
+        zbar = float(np.median(L[:, 2]))
+        a_, b_, c_ = e1[1], e2[1], -(ctr[1] + zbar * nm[1])        # keep a*u + b*v <= c
+        g = np.array([a_, b_]) / gy; d0 = c_ / gy                   # unit normal + offset
+        t_ = np.array([-g[1], g[0]]); Rr = 1e5
+        hp = _P2([g * d0 + t_ * Rr, g * d0 - t_ * Rr, g * d0 - t_ * Rr - g * Rr, g * d0 + t_ * Rr - g * Rr])
+        pg = pg.intersection(hp).buffer(0)
+        if pg.geom_type != "Polygon":
+            pg = max(pg.geoms, key=lambda q: q.area)
     B = np.array(pg.exterior.coords)[:-1]
     s2 = np.r_[0, np.cumsum(np.linalg.norm(np.diff(np.r_[B, B[:1]], axis=0), axis=1))]
     tt = np.linspace(0, s2[-1], max(int(s2[-1] / 20), 12), endpoint=False)
@@ -169,7 +198,7 @@ for p in ids:
         for j in range(nv):
             arr.SetValue(i + 1, j + 1, float(Z[i, j]))
     api = GeomAPI_PointsToBSplineSurface()
-    api.Init(arr, float(lo[0]), float(GRID), float(lo[1]), float(GRID), 3, 3, GeomAbs_C2, 0.1)
+    api.Init(arr, float(lo[0]), float(GRID), float(lo[1]), float(GRID), 3, 3, GeomAbs_C2, 0.3)
     srf = api.Surface()
     # trim curve in (u, v) = plane coordinates
     h = TColgp_HArray1OfPnt2d(1, len(B))
@@ -183,18 +212,6 @@ for p in ids:
     # local -> world
     T = gp_Trsf(); T.SetTransformation(gp_Ax3(gp_Pnt(*ctr), gp_Dir(*nm), gp_Dir(*e1)), gp_Ax3())
     face = TopoDS.Face_s(BRepBuilderAPI_Transform(face, T, True).Shape())
-    if on_c.any():                       # exact centreline: keep only y <= 0
-        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-        from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE
-        half_box = BRepPrimAPI_MakeBox(gp_Pnt(-3000, -2000, -500), gp_Pnt(3000, 0.0, 2500)).Shape()
-        cm_ = BRepAlgoAPI_Common(face, half_box); cm_.Build()
-        ex = TopExp_Explorer(cm_.Shape(), TopAbs_FACE)
-        if ex.More():
-            cand = TopoDS.Face_s(ex.Current())
-            if valid(cand):
-                face = cand
     # deviation of the patch's own vertices to the fitted height field
     Lv = to_loc(V[vid])
     zfit = srf
@@ -202,8 +219,8 @@ for p in ids:
     devs[vid] = np.abs(d)
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
-    bx = Bnd_Box(); BRepBndLib.Add_s(face, bx); x0_, y0_, z0_, x1_, y1_, z1_ = bx.Get()
-    if not (x0_ > -2500 and x1_ < 2500 and y0_ > -1300 and y1_ < 60 and z0_ > -100 and z1_ < 1500):
+    bx = Bnd_Box(); BRepBndLib.AddOptimal_s(face, bx, True, False); x0_, y0_, z0_, x1_, y1_, z1_ = bx.Get()
+    if not (x0_ > -2500 and x1_ < 2500 and y0_ > -1300 and y1_ < 25 and z0_ > -100 and z1_ < 1500):
         print("patch %d: exploded bbox %s -> skipped" % (p, [round(v) for v in bx.Get()]))
         continue
     ok_ = valid(face)
