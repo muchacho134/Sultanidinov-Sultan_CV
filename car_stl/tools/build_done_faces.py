@@ -41,36 +41,38 @@ for k in ("front", "rear"):
     w = P[k]; rw = w["r"] + GAP[k]
     wells.append((w, rw, BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(w["x"], -w["wall"], w["z"]), gp_Dir(0, -1, 0)), rw, YOUT - w["wall"]).Shape()))
 # floor faces: smoothed outline of the carved area (half car, y <= 0) clipped at y = 0, minus wells
+# floors from straight design lines (idealised, not the mesh outline)
 from shapely.geometry import Polygon, box as sbox
-from shapely.ops import unary_union
-for name, (x0, x1, zf) in FL.items():
-    sel = (lab == names.index(name))
-    poly2 = Polygon(outline_xy(sel)).buffer(0)
-    # the floor runs right up to the well opening: add the strip around each well that the
-    # wrap had rounded off, out to the body side (the side surface trims it later)
-    for w, rw, cyl in wells:
-        zc = w["z"] - zf; ch = np.sqrt(max(rw * rw - zc * zc, 0))
-        if x0 - 200 < w["x"] < x1 + 200:
-            poly2 = unary_union([poly2, sbox(w["x"] - ch - 150, -w["y_out"], w["x"] + ch + 150, -w["wall"] + 60)])
-    sec = m.section(plane_origin=[0, 0, zf + 4], plane_normal=[0, 0, 1])
-    foot = unary_union([Polygon(p[:, :2]).buffer(0) for p in sec.discrete if len(p) > 3])
-    poly2 = poly2.intersection(foot).intersection(sbox(x0 - 400, -2000, x1 + 400, 0.0)).buffer(0)
-    if poly2.geom_type != "Polygon":
-        poly2 = max(poly2.geoms, key=lambda g: g.area)
-    Q = np.array(poly2.simplify(2.0).exterior.coords)[:-1]
+D = json.load(open(sys.argv[5])) if len(sys.argv) > 5 else {}
+Y_SILL = D.get("y_sill", 825.0)                 # straight outer edge of the main floor
+X_FRONT, X_RAMP0, X_RAMP1, X_REAR = D.get("x_front", -1900.0), -1000.0, -950.0, D.get("x_rear", 1750.0)
+Y_NOSE = D.get("y_nose", 780.0)                 # outer edge of the front floor ahead of the front well
+
+
+def chord(w, rw, zf):
+    return np.sqrt(max(rw * rw - (w["z"] - zf) ** 2, 0.0))
+
+
+wf, rwf, _ = wells[0]; wr, rwr, _ = wells[1]
+zf1, zf2 = FL["front floor plane"][2], FL["main floor plane"][2]
+cf, cr = chord(wf, rwf, zf1), chord(wr, rwr, zf2)
+plans = {
+    # front floor: inboard of the slot wall from the nose end to the ramp, plus the strip ahead of the well
+    "front floor plane": (zf1, Polygon([(X_FRONT, 0), (X_RAMP0, 0), (X_RAMP0, -wf["wall"]), (wf["x"] - cf, -wf["wall"]),
+                                        (wf["x"] - cf, -Y_NOSE), (X_FRONT, -Y_NOSE)])),
+    # main floor: ramp -> rear end, straight sill edge between the wells, notched by the rear well opening
+    "main floor plane": (zf2, Polygon([(X_RAMP1, 0), (X_REAR, 0), (X_REAR, -wr["wall"]), (wr["x"] + cr, -wr["wall"]),
+                                       (wr["x"] + cr, -Y_SILL), (X_REAR, -Y_SILL)][:4] +
+                                      [(wr["x"] - cr, -wr["wall"]), (wr["x"] - cr, -Y_SILL), (X_RAMP1, -Y_SILL)])),
+}
+for name, (zf, poly2) in plans.items():
+    poly2 = poly2.buffer(0)
+    Q = np.array(poly2.exterior.coords)[:-1]
     poly = BRepBuilderAPI_MakePolygon()
     for x, y in Q: poly.Add(gp_Pnt(float(x), float(y), zf))
     poly.Close()
-    f = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, zf), gp_Dir(0, 0, -1)), poly.Wire(), True).Face()
-    slab = BRepPrimAPI_MakePrism(f, gp_Vec(0, 0, 1)).Shape()
-    for w, rw, cyl in wells:
-        slab = cut(slab, cyl)
-    e = TopExp_Explorer(slab, TopAbs_FACE)
-    while e.More():
-        ff = TopoDS.Face_s(e.Current()); a = BRepAdaptor_Surface(ff)
-        if a.GetType() == GeomAbs_Plane and abs(a.Plane().Location().Z() - zf) < 0.5 and abs(a.Plane().Axis().Direction().Z()) > 0.99:
-            faces.append((name, ff))
-        e.Next()
+    faces.append((name, BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, zf), gp_Dir(0, 0, -1)), poly.Wire(), True).Face()))
+    print("%-18s outline: %s" % (name, np.round(Q).astype(int).tolist()))
 # well walls: ruled between the arc on the slot wall and the arch lip found on the mesh;
 # both curves lie on the cylinder and the rulings run along its axis -> exactly the cylinder
 from OCP.BRepFill import BRepFill
