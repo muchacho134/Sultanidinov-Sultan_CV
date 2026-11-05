@@ -5,7 +5,7 @@ from matplotlib.collections import PolyCollection
 m = trimesh.load(sys.argv[1], force='mesh'); W = {k: np.array(v) for k, v in json.load(open(sys.argv[2])).items()}; out = sys.argv[3]
 V, F, fn, fc = m.vertices, m.faces, m.face_normals, m.triangles_center
 half = fc[:, 1] <= 5
-COL = lambda k: 'red' if k.startswith("outer") else ('blue' if k == "centreline" else ('black' if "opening" in k else ('tab:green' if k.startswith("long") else 'tab:orange')))
+COL = lambda k: 'red' if k.startswith("outer") else ('magenta' if k.startswith("roll") else 'black') if (k.startswith("roll") or 'opening' in k) else ('blue' if k == "centreline" else ('black' if "opening" in k else ('tab:green' if k.startswith("long") else 'tab:orange')))
 R = lambda yaw, pitch: (np.array([[1, 0, 0], [0, np.cos(pitch), -np.sin(pitch)], [0, np.sin(pitch), np.cos(pitch)]]) @
                         np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]]))
 views = (("SIDE", lambda X: X[:, [0, 2]], half & (fn[:, 1] < 0)),
