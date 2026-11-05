@@ -142,8 +142,10 @@ for p in ids:
     # boundary points on the centreline: push them past y = 0 (cut back exactly to y = 0 below)
     W3 = ctr + np.outer(B[:, 0], e1) + np.outer(B[:, 1], e2)
     on_c = W3[:, 1] > -25.0
+    gy = np.hypot(e1[1], e2[1])                      # how much y the patch plane carries
+    on_c = on_c & (gy > 0.4)
     if on_c.any():
-        B[on_c] += CENTRE_PUSH * np.array([e1[1], e2[1]]) / max(np.hypot(e1[1], e2[1]), 1e-6)
+        B[on_c] += CENTRE_PUSH * np.array([e1[1], e2[1]]) / gy ** 2
     # small overlap with the neighbours so no cracks show between patches
     from shapely.geometry import Polygon as _Poly
     pg = _Poly(B).buffer(0).buffer(OVERLAP, join_style=1)
@@ -190,12 +192,20 @@ for p in ids:
         cm_ = BRepAlgoAPI_Common(face, half_box); cm_.Build()
         ex = TopExp_Explorer(cm_.Shape(), TopAbs_FACE)
         if ex.More():
-            face = TopoDS.Face_s(ex.Current())
+            cand = TopoDS.Face_s(ex.Current())
+            if valid(cand):
+                face = cand
     # deviation of the patch's own vertices to the fitted height field
     Lv = to_loc(V[vid])
     zfit = srf
     d = np.array([Lv[i, 2] - srf.Value(float(Lv[i, 0]), float(Lv[i, 1])).Z() for i in range(len(Lv))])
     devs[vid] = np.abs(d)
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    bx = Bnd_Box(); BRepBndLib.Add_s(face, bx); x0_, y0_, z0_, x1_, y1_, z1_ = bx.Get()
+    if not (x0_ > -2500 and x1_ < 2500 and y0_ > -1300 and y1_ < 60 and z0_ > -100 and z1_ < 1500):
+        print("patch %d: exploded bbox %s -> skipped" % (p, [round(v) for v in bx.Get()]))
+        continue
     ok_ = valid(face)
     report.append(dict(patch=int(p), faces=int(len(sel)), area_m2=float(A[sel].sum() / 1e6), tilt=float(tilt(sel)[0]),
                        dev_p50=float(np.percentile(np.abs(d), 50)), dev_p95=float(np.percentile(np.abs(d), 95)),
