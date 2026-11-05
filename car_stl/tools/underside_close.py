@@ -178,6 +178,14 @@ for k in [k for k in W if k.startswith("cross_x")]:
         s_ = np.r_[0, np.cumsum(np.linalg.norm(np.diff(v[:, :2], axis=0), axis=1))]; s_ /= s_[-1]
         v[:, 2] += dz * np.clip((s_ - 0.6) / 0.4, 0, 1) ** 2         # blend over the last 40 %
         W[k] = v
+# snap outline ends that stop just short of the centreline onto it
+cl = W["centreline"]
+for k in [k for k in W if k.startswith("outer_edge")]:
+    v = W[k]
+    for i in (0, -1):
+        j = np.argmin(np.linalg.norm(cl[:, :2] - v[i, :2], axis=1))
+        if np.linalg.norm(cl[j, :2] - v[i, :2]) < 20: v[i] = cl[j]
+    W[k] = v
 # ---- connection check: every wire end must lie on another wire
 allp = np.vstack([v for v in W.values()])
 from scipy.spatial import cKDTree
