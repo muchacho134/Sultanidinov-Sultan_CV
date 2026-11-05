@@ -14,7 +14,7 @@ from scipy.interpolate import make_lsq_spline, RegularGridInterpolator
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 m = trimesh.load(sys.argv[1], force='mesh'); P = json.load(open(sys.argv[2])); OUT = sys.argv[3]
-G, SNAP, STRAIGHT = 10.0, 4.0, 12.0
+G, SNAP, STRAIGHT = 10.0, 4.0, 0.0      # no forced straight runs: edges keep the STL flow
 FLOORS = ((-1950.0, -1000.0, 96.8), (-950.0, 1700.0, 114.5))
 WELL = {k: (P[k]["x"], P[k]["r"] + g, P[k]["wall"], P[k]["z"], zf) for k, g, zf in (("front", 12.0, 96.8), ("rear", 8.0, 114.5))}
 FN = m.face_normals; c_ = m.triangles_center
@@ -69,7 +69,7 @@ for s in segs:
     yf = make_lsq_spline(x, y, kn, 3)(x)
     # straighten a central run whose wobble is small
     mid = np.abs(yf - np.median(yf)) < STRAIGHT
-    if mid.mean() > 0.5:
+    if STRAIGHT > 0 and mid.mean() > 0.5:
         r = np.where(mid)[0]; a, b = r[0], r[-1]
         yf[a:b + 1] = np.median(yf[a:b + 1])
         bl = 8                                            # blend the ends into the curve
@@ -90,11 +90,18 @@ for k in WELL:
     for xe in (xc - c, xc + c):
         yy = np.linspace(-wall, Ye(xe + (-25 if xe < xc else 25)), 50)
         W[f"{k}_opening_side_{int(xe)}"] = np.c_[np.full(50, xe), yy, Zf(np.full(50, xe), yy)]
-for yv in (-150.0, -300.0, -450.0, -650.0, -800.0):
-    ok = (Ye(xl) < yv - 5) & ~in_opening(xl, yv)
+# lengthwise flow lines: fixed fraction of the way from the centreline to the edge (follow the outline)
+ax_ = np.concatenate([e[:, 0] for e in E]); ay_ = np.concatenate([e[:, 1] for e in E])
+kn_ = np.r_[[ax_[0]] * 4, np.linspace(ax_[0], ax_[-1], 14)[1:-1], [ax_[-1]] * 4]
+_sp = make_lsq_spline(ax_, ay_, kn_, 3)                        # one smooth outline, bridges the openings
+Yflow = lambda x: np.minimum(_sp(np.clip(x, ax_[0], ax_[-1])), -1.0)
+for f in (0.2, 0.4, 0.6, 0.8, 0.92):
+    yv = f * np.where(np.isin(np.round(xl), np.round(ax_)) | True, Yflow(xl), 0)
+    yv = np.maximum(yv, Ye(xl) + 8)                            # stay inside the real edge
+    ok = ~in_opening(xl, yv)
     r_ = np.where(ok)[0]
     for j, r in enumerate(np.split(r_, np.where(np.diff(r_) > 1)[0] + 1)):
-        if len(r) > 3: W[f"long_y{int(-yv)}_{j}"] = np.c_[xl[r], np.full(len(r), yv), Zf(xl[r], np.full(len(r), yv))]
+        if len(r) > 3: W[f"flow_{int(f * 100)}_{j}"] = np.c_[xl[r], yv[r], Zf(xl[r], yv[r])]
 for xv in np.arange(-2100, 2200, 300.0):
     yy = np.linspace(0, Ye(xv), 120); keep = ~in_opening(xv, yy)
     r = np.where(keep)[0]
