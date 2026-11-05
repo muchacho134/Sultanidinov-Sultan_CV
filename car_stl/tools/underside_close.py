@@ -134,7 +134,7 @@ runs_ = np.split(np.arange(len(B)), np.where(np.diff(is_open.astype(int)) != 0)[
 ne = no = 0
 for r in runs_:
     if len(r) < 3: continue
-    P2 = B[r]
+    P2 = B[np.r_[r, r[-1] + 1]] if r[-1] + 1 < len(B) else B[r]     # share the joint with the next piece
     if is_open[r[0]]:
         W[f"opening_{no}"] = np.c_[P2, Zf(P2[:, 0], P2[:, 1])]; no += 1
     else:
