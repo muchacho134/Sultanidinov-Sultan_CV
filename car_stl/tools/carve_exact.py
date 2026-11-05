@@ -21,7 +21,7 @@ for lab in ("front", "rear"):
     def cyl_n(c, w=w):
         v = np.c_[w["x"] - c[:, 0], np.zeros(len(c)), w["z"] - c[:, 2]]   # well surface faces the axle
         return v / np.linalg.norm(v, axis=1)[:, None]
-    SURF.append((f"{lab} well cylinder", lambda c, f=cyl_d, w=w: np.where(c[:, 2] > w["z"] - 1, f(c), 1e9), cyl_n))
+    SURF.append((f"{lab} well cylinder", cyl_d, cyl_n))
     for sgn in (-1, 1):   # straight well walls below the axle: planes x = xc -/+ rw, facing into the well
         SURF.append((f"{lab} well wall {'front' if sgn < 0 else 'rear'}",
                      lambda c, w=w, rw=rw, sgn=sgn: np.where((c[:, 2] < w["z"] + 1) & (np.abs(c[:, 1]) > w["wall"] - 5), c[:, 0] - (w["x"] + sgn * rw), 1e9),
