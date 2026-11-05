@@ -99,49 +99,79 @@ def Yguide(x):
         y = np.where((x > a_) & (x < b_), Ye(a_) * (1 - t) + Ye(b_) * t, y)
     return y
 W = {}
-# outer edge, split exactly at the opening sides
-for j, (a, b) in enumerate(spans):
-    xx = np.linspace(a, b, max(60, int((b - a) / 5)))
-    W[f"outer_edge_{j}"] = np.c_[xx, Ye(xx), Zf(xx, Ye(xx))]
-# ---- 4. other wires (all from the same field and outline -> exact intersections)
-xl = np.unique(np.r_[np.linspace(x_tf, x_tr, 900), cuts])
-W["centreline"] = np.c_[xl, 0 * xl, Zf(xl, 0 * xl)]
+# ---- floor region in plan: outline minus the wheel openings, with filleted corners
+from shapely.geometry import Polygon as SP, LineString as SL, box as sbox
+from shapely.ops import unary_union
+R_IN, R_OUT = 60.0, 40.0
+half_poly = SP(list(zip(OXs, OYs)) + [(x_tr, 0.0), (x_tf, 0.0)]).buffer(0)
+full = unary_union([half_poly, SP([(x, -y) for x, y in half_poly.exterior.coords])]).buffer(0)
+holes = []
 for k in WELL:
-    xc, c, wall = chord(k); zf = WELL[k][4]
-    xi = np.linspace(xc - c, xc + c, 60)
-    W[f"{k}_opening_inner"] = np.c_[xi, np.full(60, -wall), Zf(xi, np.full(60, -wall))]
-    for xe in (xc - c, xc + c):
-        yy = np.linspace(-wall, Ye(xe), 50)
-        W[f"{k}_opening_side_{int(xe)}"] = np.c_[np.full(50, xe), yy, Zf(np.full(50, xe), yy)]
-for f in (0.2, 0.4, 0.6, 0.8, 0.92):                           # flow lines: converge on the tips
-    yv = f * Yguide(xl)
-    ok = ~in_opening(xl, yv)
-    for xv in cuts:                                           # end exactly on the opening sides
-        ok[np.argmin(np.abs(xl - xv))] = True
-    r_ = np.where(ok)[0]
-    for j, r in enumerate(np.split(r_, np.where(np.diff(r_) > 1)[0] + 1)):
-        if len(r) > 3: W[f"flow_{int(f * 100)}_{j}"] = np.c_[xl[r], yv[r], Zf(xl[r], yv[r])]
-for xv in np.arange(-2100, 2200, 300.0):                       # crosswise: centreline -> outline
-    win = [k for k in WELL if abs(xv - chord(k)[0]) < chord(k)[1]]
-    yy = np.linspace(0, -chord(win[0])[2] if win else Ye(xv), 150); keep = ~in_opening(xv, yy)
-    keep[-1] = True
-    r = np.where(keep)[0]
-    if len(r) and (np.diff(r) > 1).any(): r = r[: np.argmax(np.diff(r) > 1) + 1]
-    if len(r) and r[-1] < len(yy) - 1:                          # stops at an opening: end on its inner edge
-        k_ = min(WELL, key=lambda k: abs(chord(k)[0] - xv)); yy[r[-1]] = -chord(k_)[2]
-    W[f"cross_x{int(xv)}"] = np.c_[np.full(len(r), xv), yy[r], Zf(np.full(len(r), xv), yy[r])]
+    xc, c, wall = chord(k)
+    for sg in (1, -1):
+        rect = sbox(xc - c, -3000, xc + c, -wall) if sg < 0 else sbox(xc - c, wall, xc + c, 3000)
+        holes.append(rect.buffer(-R_IN, join_style=1).buffer(R_IN, join_style=1) if False else rect)
+REG = full.difference(unary_union(holes))
+REG = REG.buffer(R_OUT, join_style=1).buffer(-2 * R_OUT, join_style=1).buffer(R_OUT, join_style=1)  # round convex + concave corners
+REG = REG.buffer(-R_IN, join_style=1).buffer(R_IN, join_style=1)                                   # bigger radius on the inner slot corners
+if REG.geom_type != "Polygon": REG = max(REG.geoms, key=lambda g: g.area)
+REG = REG.intersection(sbox(-5000, -3000, 5000, 0.0))
+if REG.geom_type != "Polygon": REG = max(REG.geoms, key=lambda g: g.area)
+B = np.array(REG.exterior.coords)
+B = B[np.abs(B[:, 1]) > 0.5]                                   # drop the y = 0 (mirror) side
+# resample the boundary by arc length and split it into outer-edge / opening runs
+d = np.r_[0, np.cumsum(np.hypot(*np.diff(B, axis=0).T))]
+jump = np.where(np.diff(d) > 2000)[0]                           # the dropped centreline side shows as a jump
+if len(jump): B = np.roll(B, -(jump[0] + 1), axis=0)
+seg = np.hypot(*np.diff(B, axis=0).T)
+if (seg > 2000).any(): B = B[: np.argmax(seg > 2000) + 1]        # never interpolate across the dropped side
+d = np.r_[0, np.cumsum(np.hypot(*np.diff(B, axis=0).T))]
+t = np.arange(0, d[-1], 5.0); B = np.c_[np.interp(t, d, B[:, 0]), np.interp(t, d, B[:, 1])]
+from shapely.geometry import Point as SPt
+H_ = unary_union([h for h in holes if h.bounds[3] <= 0])
+is_open = np.array([H_.distance(SPt(p)) < R_OUT + R_IN for p in B])
+runs_ = np.split(np.arange(len(B)), np.where(np.diff(is_open.astype(int)) != 0)[0] + 1)
+ne = no = 0
+for r in runs_:
+    if len(r) < 3: continue
+    P2 = B[r]
+    if is_open[r[0]]:
+        W[f"opening_{no}"] = np.c_[P2, Zf(P2[:, 0], P2[:, 1])]; no += 1
+    else:
+        W[f"outer_edge_{ne}"] = np.c_[P2, Zf(P2[:, 0], P2[:, 1])]; ne += 1
+# ---- 4. other wires: cut by the filleted region
+xl = np.linspace(x_tf, x_tr, 1200)
+W["centreline"] = np.c_[xl, 0 * xl, Zf(xl, 0 * xl)]
+def pieces(line):
+    g = REG.intersection(line)
+    gs = [g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))
+    return [np.array(q.coords) for q in gs if q.geom_type == "LineString" and q.length > 30]
+for f in (0.2, 0.4, 0.6, 0.8, 0.92):
+    yv = np.minimum(f * Yguide(xl), -0.6)
+    for j, Q in enumerate(pieces(SL(list(zip(xl, yv))))):
+        if len(Q) < 4: continue
+        W[f"flow_{int(f * 100)}_{j}"] = np.c_[Q, Zf(Q[:, 0], Q[:, 1])]
+for xv in np.arange(-2100, 2200, 300.0):
+    ps = pieces(SL([(xv, -0.6), (xv, -3000)]))
+    if not ps: continue
+    Q = max(ps, key=lambda q: q[:, 1].max())                    # the piece that starts at the centreline
+    yy = np.linspace(Q[:, 1].max(), Q[:, 1].min(), 120)
+    W[f"cross_x{int(xv)}"] = np.c_[np.full(120, xv), yy, Zf(np.full(120, xv), yy)]
 # ---- smooth the outer-edge height, then pull the wires that end on it onto the smoothed edge
 EZ = {}
 for k in [k for k in W if k.startswith("outer_edge")]:
-    v = W[k]; t = v[:, 0]
+    v = W[k]; t = np.r_[0, np.cumsum(np.linalg.norm(np.diff(v[:, :2], axis=0), axis=1))]
+    if len(v) < 12 or t[-1] < 100: continue
     n = max(4, int(np.ptp(t) / 300) + 3)
     kn_ = np.r_[[t[0]] * 4, np.linspace(t[0], t[-1], n - 2)[1:-1], [t[-1]] * 4]
     ws_ = np.ones(len(t)); ws_[[0, -1]] = 30.0                     # keep the end heights
-    v[:, 2] = make_lsq_spline(t, v[:, 2], kn_, 3, w=ws_)(t); W[k] = v; EZ[k] = v
+    z0 = v[:, 2].copy(); zs = make_lsq_spline(t, v[:, 2], kn_, 3, w=ws_)(t)
+    u_ = t / t[-1]; corr = (z0[0] - zs[0]) * np.clip(1 - u_ / 0.15, 0, 1) ** 2 + (z0[-1] - zs[-1]) * np.clip((u_ - 0.85) / 0.15, 0, 1) ** 2
+    v[:, 2] = zs + corr; W[k] = v; EZ[k] = v                       # ends pinned to the openings
 edge_pts = np.vstack(list(EZ.values()))
 from scipy.spatial import cKDTree as _T
 _et = _T(edge_pts[:, :2])
-for k in [k for k in W if k.startswith("cross_x") or "opening_side" in k]:
+for k in [k for k in W if k.startswith("cross_x")]:
     v = W[k]; d, i = _et.query(v[-1, :2])
     if d < 15:
         dz = edge_pts[i, 2] - v[-1, 2]
