@@ -12,6 +12,13 @@ from matplotlib.collections import PolyCollection
 m = trimesh.load(sys.argv[1], force='mesh'); P = json.load(open(sys.argv[2])); OUT = sys.argv[3]
 V, F, fn, fc = m.vertices, m.faces, m.face_normals, m.triangles_center
 half = fc[:, 1] <= 5
+WIN = [(P[k]["x"], P[k]["r"] + g + 25, P[k]["wall"]) for k, g in (("front", 12.0), ("rear", 8.0))]
+def wheel_zone(X, Y=None):
+    z = np.zeros(len(X), bool)
+    for xc, hw, wall in WIN:
+        z |= np.abs(X - xc) < hw + 40      # 40 mm margin: the window edge is unreliable
+    return z
+body_f = half & ~wheel_zone(fc[:, 0])            # body faces only: no wells, no wheels
 B = m.bounds
 
 
@@ -52,10 +59,12 @@ Vb = V[np.unique(F[half])]
 inw = np.zeros(len(Vb), bool)
 for k, gap in (("front", 12.0), ("rear", 8.0)):
     w = P[k]; inw |= (np.abs(Vb[:, 0] - w["x"]) < w["r"] + gap + 5) & (Vb[:, 1] < -w["wall"] + 5)
-front_raw = binned(Vb[~inw, 1], Vb[~inw, 2], B[0, 1] + 5, 0, 15.0, np.min)
+kb = ~wheel_zone(Vb[:, 0])
+front_raw = binned(Vb[kb, 1], Vb[kb, 2], B[0, 1] + 5, 0, 15.0, np.min)
 front = lsq(front_raw[:, 0], front_raw[:, 1], 8)
 # BOTTOM: footprint - outermost |y| of the underside per x
-foot_raw = binned(Vd[:, 0], Vd[:, 1], B[0, 0] + 5, B[1, 0] - 5, 20.0, np.min)
+keep = ~wheel_zone(Vd[:, 0])
+foot_raw = binned(Vd[keep, 0], Vd[keep, 1], B[0, 0] + 5, B[1, 0] - 5, 20.0, np.min)
 fsegs = np.split(foot_raw, np.where(np.diff(foot_raw[:, 0]) > 40)[0] + 1)
 foot = [lsq(s[:, 0], s[:, 1], max(4, min(12, int(np.ptp(s[:, 0]) / 200)))) for s in fsegs if len(s) > 6]
 json.dump(dict(side=[s.tolist() for s in side], front=front.tolist(), bottom=[s.tolist() for s in foot],
@@ -67,8 +76,8 @@ for s in foot: print("BOTTOM x %5.0f..%5.0f  y %5.0f..%5.0f" % (s[0, 0], s[-1, 0
 Lt = np.array([0.35, -0.55, 0.75]); Lt /= np.linalg.norm(Lt)
 fig = plt.figure(figsize=(22, 15)); gs = fig.add_gridspec(2, 3, height_ratios=[1, 1.3])
 aS, aB, aF = fig.add_subplot(gs[0, :]), fig.add_subplot(gs[1, :2]), fig.add_subplot(gs[1, 2])
-for a, i, j, sel, title in ((aS, 0, 2, half & (fn[:, 1] < 0), "SIDE - bottom line"), (aB, 0, 1, half & (fn[:, 2] < 0), "BOTTOM (from below) - footprint"),
-                            (aF, 1, 2, half & (fn[:, 0] < 0), "FRONT - bottom line")):
+for a, i, j, sel, title in ((aS, 0, 2, body_f & (fn[:, 1] < 0), "SIDE - bottom line"), (aB, 0, 1, body_f & (fn[:, 2] < 0), "BOTTOM (from below) - footprint"),
+                            (aF, 1, 2, body_f & (fn[:, 0] < 0), "FRONT - bottom line")):
     sh = 0.45 + 0.5 * np.clip(np.abs(fn[sel] @ Lt), 0, 1)
     a.add_collection(PolyCollection(V[F[sel]][:, :, [i, j]], facecolors=plt.cm.gray(sh), edgecolors='none'))
     a.autoscale(); a.set_aspect('equal'); a.set_title(title, fontsize=14); a.grid(alpha=.25)
