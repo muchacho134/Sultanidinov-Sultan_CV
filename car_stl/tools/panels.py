@@ -40,6 +40,12 @@ for cc in np.unique(comp[rec]):
     elif reg[sel].tolist().count(4) > 0.3 * sel.sum() or (-900 < cx < 900): name = "side intake"
     else: name = "recess (other)"
     panel[sel] = name
+# feature outlines traced earlier: everything inside them is the pocket (rim, walls and floor)
+from matplotlib.path import Path as MP
+si = C["side_intake"]; pin = MP(si[:, [0, 2]]).contains_points(np.c_[X, Z], radius=-8)
+panel[half & pin & (Y < -620) & (reg != 5) & (reg != 0) & (reg != 3)] = "side intake"
+fi = C["front_corner_intake"]; pin = MP(fi[:, [1, 2]]).contains_points(np.c_[Y, Z], radius=-8)
+panel[half & pin & (X < -1850) & (reg != 5) & (reg != 0)] = "front corner intake"
 # ---- 2. landmarks
 xw0, yc0 = -1400.0, -C["canopy_base"][np.argmin(C["canopy_base"][:, 0])][1]       # windshield base at centre, canopy start |y|
 xc0 = C["canopy_base"][:, 0].min()                                                   # canopy front end x (-1620)
@@ -51,7 +57,12 @@ x_can_end = C["canopy_side_edge"][:, 0].max()
 can_y = lambda x: np.where(x <= C["canopy_base"][:, 0].max(), yline(C["canopy_base"], x), yline(C["canopy_side_edge"], x))
 x_rear_glass = lambda ay: x_can_end + 220.0 * (1 - np.clip(ay / 634.0, 0, 1) ** 2)  # rear canopy edge, curved
 fast_y = lambda x: yline(C["roof_crown_edge"], x)
-side_cut = lambda x: np.where(x < x_fend, "front fender", np.where(x > x_quart, "rear quarter", "body side"))
+# shut lines: front one leans forward from the arch up to the A-pillar foot, rear one sits just behind the intake
+FRONT_CUT = ([130, 400, 650, 830, 1000], [x_fend, x_fend - 30, x_fend - 110, -1060, -1150])
+REAR_CUT = ([130, 400, 650, 800, 1000], [x_quart, x_quart - 20, x_quart - 40, 880, 900])
+def side_cut(x, z):
+    xf = np.interp(z, *FRONT_CUT); xr = np.interp(z, *REAR_CUT)
+    return np.where(x < xf, "front fender", np.where(x > xr, "rear quarter", "body side"))
 ay = -Y
 todo = half & (panel == "")
 # bottom
@@ -63,11 +74,12 @@ panel[todo & (reg == 1)] = "tail panel"
 # top
 t = todo & (reg == 3)
 xt, yt = X[t], ay[t]
-name = np.array(side_cut(xt), dtype=object)
+name = np.array(side_cut(xt, Z[t]), dtype=object)
 hood = (xt < x_wind(yt)) & (yt < hood_y(xt))
 canopy = (xt >= x_wind(yt)) & (xt < x_rear_glass(yt)) & (yt < can_y(xt))
 fast = (xt >= x_rear_glass(yt)) & (yt < fast_y(xt) + 15)
-name[hood] = "hood"; name[canopy] = "canopy (windshield + roof)"; name[fast & ~canopy] = "engine cover / fastback"
+x_roof = lambda ay: -87.0 - 260.0 * np.clip(ay / 600.0, 0, 1) ** 2
+name[hood] = "hood"; name[canopy & (xt < x_roof(yt))] = "windshield"; name[canopy & (xt >= x_roof(yt))] = "roof"; name[fast & ~canopy] = "engine cover / fastback"
 name[(xt < -1900) & ~hood] = "front fender"
 panel[t] = name
 # side: glass = the side-region piece standing above the belt
@@ -80,7 +92,7 @@ for cc in np.unique(sc[s]):
     if np.average(Z[sel], weights=A[sel]) > 850 and A[sel].sum() > 0.05e6: glass |= sel
 panel[glass] = "side glass"
 s &= ~glass
-name = np.array(side_cut(X[s]), dtype=object)
+name = np.array(side_cut(X[s], Z[s]), dtype=object)
 name[(Z[s] < 270) & (X[s] > x_fend) & (X[s] < x_quart)] = "sill"
 name[X[s] < -1900] = "front bumper corner"; name[X[s] > 1950] = "rear bumper corner"
 panel[s] = name
@@ -89,7 +101,7 @@ panel[half & (panel == "")] = "body side"
 names = sorted(set(panel[half]))
 PAL = {"floor": (0.3, 0.45, 0.85), "front undertray": (0.45, 0.55, 0.95), "rear diffuser": (0.25, 0.35, 0.7),
        "wheel well": (0.35, 0.35, 0.38), "front fascia": (0.35, 0.75, 0.45), "tail panel": (0.9, 0.4, 0.35),
-       "hood": (0.95, 0.75, 0.25), "canopy (windshield + roof)": (0.2, 0.25, 0.32), "side glass": (0.3, 0.38, 0.48),
+       "hood": (0.95, 0.75, 0.25), "windshield": (0.2, 0.25, 0.32), "roof": (0.5, 0.55, 0.62), "side glass": (0.3, 0.38, 0.48),
        "engine cover / fastback": (0.85, 0.6, 0.2), "front fender": (0.6, 0.85, 0.35), "body side": (0.75, 0.55, 0.9),
        "rear quarter": (0.95, 0.55, 0.65), "sill": (0.55, 0.4, 0.75), "front bumper corner": (0.3, 0.65, 0.55),
        "rear bumper corner": (0.8, 0.3, 0.45), "side intake": (0.08, 0.08, 0.1), "front corner intake": (0.1, 0.1, 0.12),
