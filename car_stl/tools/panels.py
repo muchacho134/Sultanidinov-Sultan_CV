@@ -43,7 +43,8 @@ for cc in np.unique(comp[rec]):
 # feature outlines traced earlier: everything inside them is the pocket (rim, walls and floor)
 from matplotlib.path import Path as MP
 si = C["side_intake"]; pin = MP(si[:, [0, 2]]).contains_points(np.c_[X, Z], radius=-8)
-panel[half & pin & (Y < -620) & (reg != 5) & (reg != 0) & (reg != 3)] = "side intake"
+pin2 = MP(si[:, [0, 2]]).contains_points(np.c_[X, Z], radius=12)        # include the lip all round
+panel[half & pin2 & (Y < -620) & (reg != 5) & (reg != 0) & (Z < si[:, 2].max() + 5)] = "side intake"
 fi = C["front_corner_intake"]; pin = MP(fi[:, [1, 2]]).contains_points(np.c_[Y, Z], radius=-8)
 panel[half & pin & (X < -1850) & (reg != 5) & (reg != 0)] = "front corner intake"
 # ---- 2. landmarks
@@ -97,6 +98,9 @@ name[(Z[s] < 270) & (X[s] > x_fend) & (X[s] < x_quart)] = "sill"
 name[X[s] < -1900] = "front bumper corner"; name[X[s] > 1950] = "rear bumper corner"
 panel[s] = name
 panel[half & (panel == "")] = "body side"
+# ledges and ceilings inside the tail face (below the deck edge) belong to the tail panel
+tail_ledge = half & (X > 2120) & (Z < 870) & (Z > 300) & np.isin(panel, ["engine cover / fastback", "rear quarter", "rear diffuser"])
+panel[tail_ledge] = "tail panel"
 # ---- report + render
 names = sorted(set(panel[half]))
 PAL = {"floor": (0.3, 0.45, 0.85), "front undertray": (0.45, 0.55, 0.95), "rear diffuser": (0.25, 0.35, 0.7),
