@@ -10,7 +10,9 @@ m = trimesh.load(sys.argv[1], force='mesh'); lab0 = np.load(sys.argv[2], allow_p
 EDGE, PER_CTRL, BAND = float(sys.argv[4]), 400.0, 70.0
 keep = m.triangles_center[:, 1] <= 5
 h = m.submesh([np.where(keep)[0]], append=True)
-V, F = trimesh.remesh.subdivide_to_size(h.vertices, h.faces, max_edge=EDGE)
+cut = m.slice_plane(plane_origin=[0, 0, 0], plane_normal=[0, -1, 0])   # exact half: everything at y <= 0, seam on y = 0
+V, F = trimesh.remesh.subdivide_to_size(cut.vertices, cut.faces, max_edge=EDGE)
+V[np.abs(V[:, 1]) < 1e-6, 1] = 0.0
 s = trimesh.Trimesh(V, F, process=False)
 _, j = cKDTree(h.triangles_center).query(s.triangles_center)
 lab = lab0[keep][j].astype(object)
