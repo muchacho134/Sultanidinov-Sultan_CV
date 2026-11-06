@@ -13,6 +13,7 @@ h = m.submesh([np.where(keep)[0]], append=True)
 cut = m.slice_plane(plane_origin=[0, 0, 0], plane_normal=[0, -1, 0])   # exact half: everything at y <= 0, seam on y = 0
 V, F = trimesh.remesh.subdivide_to_size(cut.vertices, cut.faces, max_edge=EDGE)
 V[np.abs(V[:, 1]) < 1e-6, 1] = 0.0
+_w = trimesh.Trimesh(V, F, process=False); _w.merge_vertices(); V, F = np.asarray(_w.vertices), np.asarray(_w.faces)   # weld after subdividing
 s = trimesh.Trimesh(V, F, process=False)
 _, j = cKDTree(h.triangles_center).query(s.triangles_center)
 lab = lab0[keep][j].astype(object)
