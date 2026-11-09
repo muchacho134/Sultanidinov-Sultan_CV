@@ -103,6 +103,9 @@ panel[half & (panel == "")] = "body side"
 # ledges and ceilings inside the tail face (below the deck edge) belong to the tail panel
 tail_ledge = half & (X > 2120) & (Z < 870) & (Z > 300) & np.isin(panel, ["engine cover / fastback", "rear quarter", "rear diffuser"])
 panel[tail_ledge] = "tail panel"
+# top-facing bits inside the rear diffuser area are diffuser, not engine cover / quarter
+low_rear = half & (X > 1700) & (Z < 400) & np.isin(panel, ["engine cover / fastback", "rear quarter top", "rear quarter"])
+panel[low_rear] = "rear diffuser"
 # ---- report + render
 names = sorted(set(panel[half]))
 PAL = {"floor": (0.3, 0.45, 0.85), "front undertray": (0.45, 0.55, 0.95), "rear diffuser": (0.25, 0.35, 0.7),
