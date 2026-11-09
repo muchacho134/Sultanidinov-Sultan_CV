@@ -1,0 +1,122 @@
+{
+ "body side": {
+  "valid": true,
+  "curves": 12,
+  "dev_median": 1.6886054380267517,
+  "dev_p90": 313.1771246495191
+ },
+ "diffuser opening": {
+  "valid": true,
+  "curves": 4,
+  "dev_median": 3.916472866858307,
+  "dev_p90": 252.84813847551948
+ },
+ "engine cover / fastback": {
+  "valid": true,
+  "curves": 4,
+  "dev_median": 1.3642860787219715,
+  "dev_p90": 11.82372163693691
+ },
+ "floor": {
+  "valid": true,
+  "curves": 7,
+  "dev_median": 2.02300991085538,
+  "dev_p90": 17.441819401640462
+ },
+ "front bumper corner": {
+  "valid": true,
+  "curves": 2,
+  "dev_median": 1.421557170654867,
+  "dev_p90": 6.218457632384332
+ },
+ "front corner intake": {
+  "valid": true,
+  "curves": 2,
+  "dev_median": 0.3096849055199006,
+  "dev_p90": 4.248720426816468
+ },
+ "front fascia": {
+  "valid": true,
+  "curves": 5,
+  "dev_median": 0.6261520170831185,
+  "dev_p90": 2.496792916698874
+ },
+ "front fender": {
+  "valid": true,
+  "curves": 10,
+  "dev_median": 41.97781524514254,
+  "dev_p90": 116.18189839773439
+ },
+ "front undertray": {
+  "valid": true,
+  "curves": 6,
+  "dev_median": 2.3602812917496703,
+  "dev_p90": 25.175304092883497
+ },
+ "hood": {
+  "valid": true,
+  "curves": 6,
+  "dev_median": 0.13326480038618715,
+  "dev_p90": 0.7008717320754032
+ },
+ "rear bumper corner": {
+  "valid": true,
+  "curves": 3,
+  "dev_median": 1.0051645250357657,
+  "dev_p90": 532.8971356889306
+ },
+ "rear diffuser": {
+  "valid": true,
+  "curves": 7,
+  "dev_median": 11.386052133492242,
+  "dev_p90": 230.09871434057024
+ },
+ "rear quarter": {
+  "valid": true,
+  "curves": 12,
+  "dev_median": 7.727276856292059,
+  "dev_p90": 35.30433412542693
+ },
+ "roof": {
+  "valid": true,
+  "curves": 5,
+  "dev_median": 0.24899173744834,
+  "dev_p90": 0.8489203222009561
+ },
+ "side glass": {
+  "valid": true,
+  "curves": 5,
+  "dev_median": 0.441093560262677,
+  "dev_p90": 3.1247643744320124
+ },
+ "side intake": {
+  "valid": true,
+  "curves": 6,
+  "dev_median": 1.4237796707408958,
+  "dev_p90": 24.224838893485355
+ },
+ "sill": {
+  "valid": true,
+  "curves": 6,
+  "dev_median": 0.824817024879589,
+  "dev_p90": 2.752295466933118
+ },
+ "tail light recess": {
+  "valid": true,
+  "curves": 1,
+  "dev_median": 0.5550393946085546,
+  "dev_p90": 11.893902410120708
+ },
+ "tail panel": {
+  "valid": true,
+  "curves": 12,
+  "dev_median": 3.6832238054397033,
+  "dev_p90": 10.18929764846264
+ },
+ "windshield": {
+  "valid": true,
+  "curves": 6,
+  "dev_median": 0.34345585229271014,
+  "dev_p90": 2.9282071239559966
+ }
+}

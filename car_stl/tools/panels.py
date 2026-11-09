@@ -82,6 +82,8 @@ fast = (xt >= x_rear_glass(yt)) & (yt < fast_y(xt) + 15)
 x_roof = lambda ay: -87.0 - 260.0 * np.clip(ay / 600.0, 0, 1) ** 2
 name[hood] = "hood"; name[canopy & (xt < x_roof(yt))] = "windshield"; name[canopy & (xt >= x_roof(yt))] = "roof"; name[fast & ~canopy] = "engine cover / fastback"
 name[(xt < -1900) & ~hood] = "front fender"
+# panels that wrap over a corner are split into their top and side faces (one surface each)
+name[name == "front fender"] = "front fender top"; name[name == "rear quarter"] = "rear quarter top"
 panel[t] = name
 # side: glass = the side-region piece standing above the belt
 s = todo & (reg == 4)
@@ -106,7 +108,7 @@ names = sorted(set(panel[half]))
 PAL = {"floor": (0.3, 0.45, 0.85), "front undertray": (0.45, 0.55, 0.95), "rear diffuser": (0.25, 0.35, 0.7),
        "wheel well": (0.35, 0.35, 0.38), "front fascia": (0.35, 0.75, 0.45), "tail panel": (0.9, 0.4, 0.35),
        "hood": (0.95, 0.75, 0.25), "windshield": (0.2, 0.25, 0.32), "roof": (0.5, 0.55, 0.62), "side glass": (0.3, 0.38, 0.48),
-       "engine cover / fastback": (0.85, 0.6, 0.2), "front fender": (0.6, 0.85, 0.35), "body side": (0.75, 0.55, 0.9),
+       "engine cover / fastback": (0.85, 0.6, 0.2), "front fender": (0.6, 0.85, 0.35), "front fender top": (0.75, 0.92, 0.5), "rear quarter top": (0.98, 0.72, 0.78), "body side": (0.75, 0.55, 0.9),
        "rear quarter": (0.95, 0.55, 0.65), "sill": (0.55, 0.4, 0.75), "front bumper corner": (0.3, 0.65, 0.55),
        "rear bumper corner": (0.8, 0.3, 0.45), "side intake": (0.08, 0.08, 0.1), "front corner intake": (0.1, 0.1, 0.12),
        "tail light recess": (0.75, 0.1, 0.1), "diffuser opening": (0.12, 0.12, 0.14), "recess (other)": (0.5, 0.5, 0.5)}

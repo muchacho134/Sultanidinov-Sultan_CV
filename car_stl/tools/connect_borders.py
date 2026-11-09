@@ -66,12 +66,13 @@ for comp in nx.connected_components(rest):
     if cyc: chains.append(max(cyc, key=len) + [max(cyc, key=len)[0]])
 
 
-def fit(P, a=None, b=None, closed=False):
+FEATURES = ("side intake", "front corner intake", "tail light recess", "diffuser opening", "wheel well", "side glass")
+def fit(P, a=None, b=None, closed=False, per=None):
     t = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
     L = t[-1]
     if L < 1e-6: return P
     t /= L; _, u = np.unique(t, return_index=True); t, P = t[u], P[u]
-    n = max(4, int(L / PER_CTRL) + 3)
+    n = max(4, int(L / (per or PER_CTRL)) + 3)
     if len(P) <= n + 1: Q = P.copy()
     else:
         kn = np.r_[[0] * 4, np.linspace(0, 1, n - 2)[1:-1], [1] * 4]
@@ -92,7 +93,10 @@ for i, ch in enumerate(chains):
     if a is not None and b is not None and node_of[ch[0]] == node_of[ch[-1]] and L < 3 * NODE_R:
         dropped += 1; continue                          # a stub inside one node
     pair = G.edges[ch[0], ch[1]]["pair"]
-    W[f"{pair[0]}|{pair[1]}|{i}"] = fit(P, a, b, closed=(ch[0] == ch[-1] and a is None))
+    if a is None and b is None and ch[0] != ch[-1]:
+        dropped += 1; continue                          # dangling fragment: touches nothing
+    per = PER_CTRL if any(f in pair for f in FEATURES) else 600.0
+    W[f"{pair[0]}|{pair[1]}|{i}"] = fit(P, a, b, closed=(ch[0] == ch[-1] and a is None), per=per)
 # check
 ends = []
 for k, Q in W.items():
@@ -104,7 +108,7 @@ json.dump({k: v.tolist() for k, v in W.items()}, open(OUT.replace(".png", ".json
 PAL = {"floor": (0.3, 0.45, 0.85), "front undertray": (0.45, 0.55, 0.95), "rear diffuser": (0.25, 0.35, 0.7),
        "wheel well": (0.35, 0.35, 0.38), "front fascia": (0.35, 0.75, 0.45), "tail panel": (0.9, 0.4, 0.35),
        "hood": (0.95, 0.75, 0.25), "windshield": (0.2, 0.25, 0.32), "roof": (0.5, 0.55, 0.62), "side glass": (0.3, 0.38, 0.48),
-       "engine cover / fastback": (0.85, 0.6, 0.2), "front fender": (0.6, 0.85, 0.35), "body side": (0.75, 0.55, 0.9),
+       "engine cover / fastback": (0.85, 0.6, 0.2), "front fender": (0.6, 0.85, 0.35), "front fender top": (0.75, 0.92, 0.5), "rear quarter top": (0.98, 0.72, 0.78), "body side": (0.75, 0.55, 0.9),
        "rear quarter": (0.95, 0.55, 0.65), "sill": (0.55, 0.4, 0.75), "front bumper corner": (0.3, 0.65, 0.55),
        "rear bumper corner": (0.8, 0.3, 0.45), "side intake": (0.08, 0.08, 0.1), "front corner intake": (0.1, 0.1, 0.12),
        "tail light recess": (0.75, 0.1, 0.1), "diffuser opening": (0.12, 0.12, 0.14), "recess (other)": (0.5, 0.5, 0.5)}
