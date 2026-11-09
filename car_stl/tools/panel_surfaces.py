@@ -38,8 +38,11 @@ def edge_of(Q):
     return BRepBuilderAPI_MakeEdge(GeomAPI_PointsToBSpline(arr, 3, 8).Curve()).Edge()
 
 
-def loop_of(panel):
+def loop_of(panel, faces_xyz=None):
     curves = {k: Q for k, Q in NET.items() if panel in k.split("|")[:2]}
+    if faces_xyz is not None:                         # only the curves that bound this piece
+        tq = cKDTree(faces_xyz)
+        curves = {k: Q for k, Q in curves.items() if np.median(tq.query(Q)[0]) < 20}
     key = lambda p: tuple(np.round(p, 1))
     G = nx.MultiGraph()
     for k, Q in curves.items():
@@ -59,15 +62,26 @@ def loop_of(panel):
 
 names = sorted(set(lab)) if ONLY is None else ONLY
 comp = TopoDS_Compound(); bb = BRep_Builder(); bb.MakeCompound(comp); report = {}
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
+_m = trimesh.Trimesh(V, F, process=False); adjF = _m.face_adjacency; Af = _m.area_faces
+jobs = []
 for p in names:
     if p in SKIP: continue
-    loop = loop_of(p)
+    sel = lab == p; ok_ = sel[adjF[:, 0]] & sel[adjF[:, 1]]
+    nc, cc = connected_components(coo_matrix((np.ones(ok_.sum()), (adjF[ok_, 0], adjF[ok_, 1])), shape=(len(F), len(F))), directed=False)
+    pieces = [np.where(sel & (cc == k))[0] for k in np.unique(cc[sel])]
+    pieces = [q for q in pieces if Af[q].sum() > 0.01e6]
+    for k, q in enumerate(sorted(pieces, key=lambda q: -Af[q].sum())):
+        jobs.append((p, q, f"{p}" if len(pieces) == 1 else f"{p} #{k + 1}"))
+for p, fi_piece, tag in jobs:
+    loop = loop_of(p, fc[fi_piece])
     if not loop:
-        print("%-26s no closed border loop" % p); report[p] = "no loop"; continue
+        print("%-26s no closed border loop" % tag); report[tag] = "no loop"; continue
     mf = BRepOffsetAPI_MakeFilling(3, 15, 2, False, 1e-3, 1e-2, 0.05, 0.1, 8, 9)
     for Q in loop:
         mf.Add(edge_of(Q), GeomAbs_C0)
-    fi = np.where(lab == p)[0]
+    fi = fi_piece
     loopP = np.vstack(loop); far = cKDTree(loopP).query(fc[fi])[0] > 60     # interior only, away from the border
     pts = fc[fi[far]]
     if len(pts):
@@ -76,9 +90,9 @@ for p in names:
     try:
         mf.Build(); ok = mf.IsDone()
     except Exception as e:
-        ok = False; print("%-26s fill failed: %s" % (p, e))
+        ok = False; print("%-26s fill failed: %s" % (tag, e))
     if not ok:
-        report[p] = "fill failed"; continue
+        report[tag] = "fill failed"; continue
     face = mf.Shape()
     if not valid(face):
         from OCP.ShapeFix import ShapeFix_Shape
@@ -88,8 +102,8 @@ for p in names:
     for q in chk:
         ds = BRepExtrema_DistShapeShape(face, BRepBuilderAPI_MakeVertex(gp_Pnt(*map(float, q))).Vertex()); ds.Perform(); d.append(ds.Value())
     d = np.array(d)
-    report[p] = dict(valid=bool(valid(face)), curves=len(loop), dev_median=float(np.median(d)), dev_p90=float(np.percentile(d, 90)))
-    print("%-26s curves %2d  valid %s  STL deviation median %5.1f  p90 %5.1f mm" % (p, len(loop), report[p]["valid"], np.median(d), np.percentile(d, 90)), flush=True)
+    report[tag] = dict(valid=bool(valid(face)), curves=len(loop), dev_median=float(np.median(d)), dev_p90=float(np.percentile(d, 90)))
+    print("%-26s curves %2d  valid %s  STL deviation median %5.1f  p90 %5.1f mm" % (tag, len(loop), report[tag]["valid"], np.median(d), np.percentile(d, 90)), flush=True)
     bb.Add(comp, face)
 BRepTools.Write_s(comp, OUT)
 json.dump(report, open(OUT.replace(".brep", "_report.json"), "w"), indent=1)
